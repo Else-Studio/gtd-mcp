@@ -212,3 +212,76 @@ func TestE2E_TaskDelegateClear(t *testing.T) {
 	}
 }
 
+func TestE2E_AutoCreateProjectAndArea(t *testing.T) {
+	workspaceDir := t.TempDir()
+
+	// 1. Initialize workspace
+	runCmdE2E(t, workspaceDir, "init")
+
+	// 2. Add task with a new project using +
+	taskResult := runCmdE2E(t, workspaceDir, "task", "add", "Task with new project +Brand New Project")
+	taskOutput, ok := taskResult["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected task object in data")
+	}
+	projectID, ok := taskOutput["projectId"].(string)
+	if !ok || projectID == "" {
+		t.Fatalf("expected task to have a valid projectId assigned")
+	}
+
+	// Verify project was actually created
+	projListRes := runCmdE2E(t, workspaceDir, "project", "list")
+	projDataList, ok := projListRes["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected project data list")
+	}
+	foundProject := false
+	for _, p := range projDataList {
+		projMap := p.(map[string]interface{})
+		if projMap["id"].(string) == projectID {
+			foundProject = true
+			if projMap["title"].(string) != "Brand New Project" {
+				t.Errorf("expected project title 'Brand New Project', got %q", projMap["title"])
+			}
+			if projMap["status"].(string) != "active" {
+				t.Errorf("expected project status 'active', got %q", projMap["status"])
+			}
+		}
+	}
+	if !foundProject {
+		t.Errorf("expected new project to be found in project list")
+	}
+
+	// 3. Add task with a new area using !
+	taskResult2 := runCmdE2E(t, workspaceDir, "task", "add", "Task with new area !Brand New Area")
+	taskOutput2, ok := taskResult2["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected task object in data")
+	}
+	areaID, ok := taskOutput2["areaId"].(string)
+	if !ok || areaID == "" {
+		t.Fatalf("expected task to have a valid areaId assigned")
+	}
+
+	// Verify area was actually created
+	areaListRes := runCmdE2E(t, workspaceDir, "area", "list")
+	areaDataList, ok := areaListRes["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected area data list")
+	}
+	foundArea := false
+	for _, a := range areaDataList {
+		areaMap := a.(map[string]interface{})
+		if areaMap["id"].(string) == areaID {
+			foundArea = true
+			if areaMap["name"].(string) != "Brand New Area" {
+				t.Errorf("expected area name 'Brand New Area', got %q", areaMap["name"])
+			}
+		}
+	}
+	if !foundArea {
+		t.Errorf("expected new area to be found in area list")
+	}
+}
+
+

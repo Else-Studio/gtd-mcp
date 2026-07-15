@@ -92,6 +92,49 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 			task.EnergyLevel = *parsed.EnergyLevel
 		}
 
+		if parsed.ProjectTitle != nil {
+			project := &domain.Project{
+				ID:        uuid.New().String(),
+				Title:     *parsed.ProjectTitle,
+				Status:    domain.ProjectStatusActive,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if err := appCtx.projectRepo.Save(project); err != nil {
+				return fmt.Errorf("save new project: %w", err)
+			}
+			if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
+				return fmt.Errorf("sync new project: %w", err)
+			}
+			task.ProjectID = &project.ID
+			task.AreaID = nil
+		} else if parsed.AreaName != nil {
+			area := &domain.Area{
+				ID:        uuid.New().String(),
+				Name:      *parsed.AreaName,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if err := appCtx.areaRepo.Save(area); err != nil {
+				return fmt.Errorf("save new area: %w", err)
+			}
+			if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
+				return fmt.Errorf("sync new area: %w", err)
+			}
+			task.AreaID = &area.ID
+			task.ProjectID = nil
+		}
+
+		if parsed.AssignedTo != nil {
+			task.AssignedTo = *parsed.AssignedTo
+		}
+		if parsed.Description != nil {
+			task.Description = *parsed.Description
+		}
+		if parsed.EnergyLevel != nil {
+			task.EnergyLevel = *parsed.EnergyLevel
+		}
+
 		if err := appCtx.taskRepo.Save(task); err != nil {
 			return fmt.Errorf("save task: %w", err)
 		}
@@ -158,15 +201,48 @@ Example:
 				if len(parsed.Tags) > 0 {
 					task.Tags = parsed.Tags
 				}
-				if parsed.ProjectID != nil {
+				if parsed.ProjectTitle != nil {
+					project := &domain.Project{
+						ID:        uuid.New().String(),
+						Title:     *parsed.ProjectTitle,
+						Status:    domain.ProjectStatusActive,
+						CreatedAt: now,
+						UpdatedAt: now,
+					}
+					if err := appCtx.projectRepo.Save(project); err != nil {
+						return fmt.Errorf("save new project: %w", err)
+					}
+					if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
+						return fmt.Errorf("sync new project: %w", err)
+					}
+					task.ProjectID = &project.ID
+					task.AreaID = nil
+				} else if parsed.ProjectID != nil {
 					task.ProjectID = parsed.ProjectID
 					task.AreaID = nil
 				}
-				if parsed.AreaID != nil {
+
+				if parsed.AreaName != nil {
+					area := &domain.Area{
+						ID:        uuid.New().String(),
+						Name:      *parsed.AreaName,
+						CreatedAt: now,
+						UpdatedAt: now,
+					}
+					if err := appCtx.areaRepo.Save(area); err != nil {
+						return fmt.Errorf("save new area: %w", err)
+					}
+					if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
+						return fmt.Errorf("sync new area: %w", err)
+					}
+					task.AreaID = &area.ID
+					if task.ProjectID != nil {
+						task.AreaID = nil
+					}
+				} else if parsed.AreaID != nil {
 					task.AreaID = parsed.AreaID
-					if task.ProjectID == nil {
-						// Area only applies if no project
-						task.AreaID = parsed.AreaID
+					if task.ProjectID != nil {
+						task.AreaID = nil
 					}
 				}
 				if parsed.AssignedTo != nil {

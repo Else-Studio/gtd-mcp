@@ -205,6 +205,32 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			name:          "New Project Parsed but Not Found",
+			input:         "Buy paint +New Project",
+			expectedTitle: "Buy paint",
+			validate: func(t *testing.T, res *parser.ParseResult) {
+				if res.ProjectID != nil {
+					t.Errorf("expected ProjectID to be nil, got %v", res.ProjectID)
+				}
+				if res.ProjectTitle == nil || *res.ProjectTitle != "New Project" {
+					t.Errorf("expected ProjectTitle 'New Project', got %v", res.ProjectTitle)
+				}
+			},
+		},
+		{
+			name:          "New Area Parsed but Not Found",
+			input:         "Buy paint !New Area",
+			expectedTitle: "Buy paint",
+			validate: func(t *testing.T, res *parser.ParseResult) {
+				if res.AreaID != nil {
+					t.Errorf("expected AreaID to be nil, got %v", res.AreaID)
+				}
+				if res.AreaName == nil || *res.AreaName != "New Area" {
+					t.Errorf("expected AreaName 'New Area', got %v", res.AreaName)
+				}
+			},
+		},
+		{
 			name:      "Empty Title Fails",
 			input:     " ",
 			opts:      parser.ParseOptions{FallbackTitle: ""},

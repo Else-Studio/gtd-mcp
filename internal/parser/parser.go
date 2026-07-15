@@ -23,7 +23,9 @@ type ParseResult struct {
 	Contexts            []string
 	Tags                []string
 	ProjectID           *string
+	ProjectTitle        *string
 	AreaID              *string
+	AreaName            *string
 	AssignedTo          *string
 	DueDate             *time.Time
 	StartTime           *time.Time
@@ -240,10 +242,33 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 						tokenContent.WriteString(matched)
 						i += len([]rune(matched))
 					} else {
-						// fallback: read until space
-						for i < n && runes[i] != ' ' && runes[i] != '\t' {
+						// fallback: read first word
+						for i < n && runes[i] != ' ' && runes[i] != '\t' && runes[i] != '\r' && runes[i] != '\n' {
 							tokenContent.WriteRune(runes[i])
 							i++
+						}
+						// if it is + or !, read subsequent words if they don't start with control prefix
+						if ch == '+' || ch == '!' {
+							for {
+								spStart := i
+								for i < n && (runes[i] == ' ' || runes[i] == '\t') {
+									i++
+								}
+								if i >= n || runes[i] == '\r' || runes[i] == '\n' {
+									i = spStart // backtrack
+									break
+								}
+								nextCh := runes[i]
+								if nextCh == '@' || nextCh == '#' || nextCh == '+' || nextCh == '!' || nextCh == '%' || nextCh == '/' {
+									i = spStart // backtrack
+									break
+								}
+								tokenContent.WriteRune(' ')
+								for i < n && runes[i] != ' ' && runes[i] != '\t' && runes[i] != '\r' && runes[i] != '\n' {
+									tokenContent.WriteRune(runes[i])
+									i++
+								}
+							}
 						}
 					}
 				}
@@ -261,15 +286,18 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 				if ok {
 					res.ProjectID = &id
 					res.AreaID = nil // Container exclusivity
+				} else {
+					res.ProjectTitle = &val
 				}
 			case '!':
 				id, ok := areaMap[strings.ToLower(val)]
 				if ok {
 					res.AreaID = &id
 					if res.ProjectID == nil { // Project wins exclusivity on capture
-						// actually wait, if both + and ! are present, + wins. We enforce this at the end.
 						res.AreaID = &id
 					}
+				} else {
+					res.AreaName = &val
 				}
 			case '%':
 				res.AssignedTo = &val
@@ -290,8 +318,9 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 	}
 
 	// Enforce container exclusivity
-	if res.ProjectID != nil {
+	if res.ProjectID != nil || res.ProjectTitle != nil {
 		res.AreaID = nil
+		res.AreaName = nil
 	}
 
 	title := strings.TrimSpace(strings.Join(titleParts, ""))
