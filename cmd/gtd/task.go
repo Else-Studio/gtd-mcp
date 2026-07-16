@@ -45,6 +45,7 @@ Unquoted entity tokens are a single word only; use quotes for multi-word names:
 
 Example:
   gtd task add "Email Bob about proposal %Bob @computer +\"Work Migration\" /due:tomorrow"
+  gtd add "…"   # root shortcut for the same command
 
 Returns a JSON task object containing fields like id, title, status, contexts, tags, and warnings. In plain mode, prints a single-row task table.`,
 	Args:  cobra.ExactArgs(1),

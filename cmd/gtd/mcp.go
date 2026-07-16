@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,36 +38,33 @@ func init() {
 }
 
 func registerResources(s *server.MCPServer) {
-	// 1. Static Methodology Resource (Comprehensive guide)
-	s.AddResource(mcp.NewResource("gtd://methodology", "GTD Coaching Methodology", mcp.WithResourceDescription("Exhaustive GTD rules for the AI Coach"), mcp.WithMIMEType("text/markdown")),
-		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: methodologyText}}, nil
-		})
+	s.AddResource(mcp.NewResource(
+		"gtd://methodology",
+		"GTD Coaching Methodology",
+		mcp.WithResourceDescription("Full GTD coach rulebook: phases, NLP tokens, MCP SOPs, tool catalog, filter/clear conventions"),
+		mcp.WithMIMEType("text/markdown"),
+	), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: methodologyText}}, nil
+	})
 
-	// 2. Static Getting Started Guide Resource (Onboarding primer)
-	s.AddResource(mcp.NewResource("gtd://guides/getting_started", "GTD Getting Started Guide", mcp.WithResourceDescription("Onboarding primer for setting up Areas, Projects, and capturing"), mcp.WithMIMEType("text/markdown")),
-		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: gettingStartedText}}, nil
-		})
+	s.AddResource(mcp.NewResource(
+		"gtd://guides/getting_started",
+		"GTD Getting Started Guide",
+		mcp.WithResourceDescription("Onboarding primer: areas, projects, initial capture and clarify (CLI + MCP)"),
+		mcp.WithMIMEType("text/markdown"),
+	), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: gettingStartedText}}, nil
+	})
 
-	// 2. Dynamic State Resource (Real-time system health)
-	s.AddResource(mcp.NewResource("gtd://state", "Current GTD System State", mcp.WithResourceDescription("Current metrics like stalled projects and agenda"), mcp.WithMIMEType("application/json")),
-		func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			stalledOut, _ := executeCLI("stalled")
-			agendaOut, _ := executeCLI("agenda")
-
-			stalledText := "{}"
-			agendaText := "{}"
-			if len(stalledOut.Content) > 0 {
-				stalledText = stalledOut.Content[0].(mcp.TextContent).Text
-			}
-			if len(agendaOut.Content) > 0 {
-				agendaText = agendaOut.Content[0].(mcp.TextContent).Text
-			}
-
-			state := fmt.Sprintf(`{"stalled_projects_response": %s, "agenda_response": %s}`, stalledText, agendaText)
-			return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "application/json", Text: state}}, nil
-		})
+	s.AddResource(mcp.NewResource(
+		"gtd://state",
+		"Current GTD System State",
+		mcp.WithResourceDescription("Health counts only: inbox_count, next_count, agenda_count, stalled_project_count, waiting_count, someday_count, workspace_ok, errors. Use query tools for full lists."),
+		mcp.WithMIMEType("application/json"),
+	), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		state := buildStateJSON()
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "application/json", Text: state}}, nil
+	})
 }
 
 func registerPrompts(s *server.MCPServer) {
@@ -78,7 +76,9 @@ func registerPrompts(s *server.MCPServer) {
 						Role: mcp.RoleUser,
 						Content: mcp.TextContent{
 							Type: "text",
-							Text: "I want to do GTD. Please read the gtd://methodology resource to assume your coach persona, then read gtd://state to analyze my system, and finally tell me what I should focus on right now.",
+							Text: "I want to do GTD. Read gtd://methodology for coach rules, then read gtd://state for health counts " +
+								"(inbox, next, agenda, stalled, waiting, someday). Based on those counts, tell me what to focus on now. " +
+								"Use MCP tools: gtd_get_inbox / gtd_get_agenda / gtd_get_next / gtd_get_stalled / gtd_task_list as needed — not shell.",
 						},
 					},
 				},
@@ -86,178 +86,263 @@ func registerPrompts(s *server.MCPServer) {
 		})
 }
 
-const coachInstruction = "Before answering the user, you MUST read the gtd://methodology resource to adopt the GTD Coach persona. If a tool returns an error about the workspace not being initialized or missing, you MUST call the gtd_init tool."
+// buildStateJSON returns compact health counts by invoking CLI list shortcuts.
+func buildStateJSON() string {
+	type state struct {
+		InboxCount           int      `json:"inbox_count"`
+		NextCount            int      `json:"next_count"`
+		AgendaCount          int      `json:"agenda_count"`
+		StalledProjectCount  int      `json:"stalled_project_count"`
+		WaitingCount         int      `json:"waiting_count"`
+		SomedayCount         int      `json:"someday_count"`
+		WorkspaceOK          bool     `json:"workspace_ok"`
+		Errors               []string `json:"errors"`
+	}
+	out := state{WorkspaceOK: true, Errors: []string{}}
+
+	countFrom := func(label string, args ...string) int {
+		res, err := executeCLI(args...)
+		if err != nil {
+			out.WorkspaceOK = false
+			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", label, err))
+			return 0
+		}
+		if res == nil || len(res.Content) == 0 {
+			out.WorkspaceOK = false
+			out.Errors = append(out.Errors, label+": empty response")
+			return 0
+		}
+		// Tool errors are returned as text content with IsError set.
+		if res.IsError {
+			out.WorkspaceOK = false
+			text := toolResultText(res)
+			out.Errors = append(out.Errors, label+": "+text)
+			return 0
+		}
+		n, parseErr := countJSONDataArray(toolResultText(res))
+		if parseErr != nil {
+			out.WorkspaceOK = false
+			out.Errors = append(out.Errors, label+": "+parseErr.Error())
+			return 0
+		}
+		return n
+	}
+
+	out.InboxCount = countFrom("inbox", "inbox")
+	out.NextCount = countFrom("next", "next")
+	out.AgendaCount = countFrom("agenda", "agenda")
+	out.StalledProjectCount = countFrom("stalled", "stalled")
+	out.WaitingCount = countFrom("waiting", "task", "list", "waiting")
+	out.SomedayCount = countFrom("someday", "task", "list", "someday")
+
+	b, err := json.Marshal(out)
+	if err != nil {
+		return `{"workspace_ok":false,"errors":["marshal state failed"]}`
+	}
+	return string(b)
+}
+
+func toolResultText(res *mcp.CallToolResult) string {
+	if res == nil || len(res.Content) == 0 {
+		return ""
+	}
+	if tc, ok := res.Content[0].(mcp.TextContent); ok {
+		return tc.Text
+	}
+	return fmt.Sprint(res.Content[0])
+}
+
+// countJSONDataArray parses CLI JSON envelope {"success":true,"data":[...]} and returns len(data).
+func countJSONDataArray(raw string) (int, error) {
+	var envelope struct {
+		Success bool            `json:"success"`
+		Data    json.RawMessage `json:"data"`
+		Error   *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+		return 0, fmt.Errorf("invalid JSON: %w", err)
+	}
+	if !envelope.Success {
+		msg := "command failed"
+		if envelope.Error != nil && envelope.Error.Message != "" {
+			msg = envelope.Error.Message
+		}
+		return 0, fmt.Errorf("%s", msg)
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return 0, nil
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(envelope.Data, &arr); err != nil {
+		return 0, fmt.Errorf("data is not an array: %w", err)
+	}
+	return len(arr), nil
+}
 
 func registerTools(s *server.MCPServer) {
-	initTool := mcp.NewTool("gtd_init",
-		mcp.WithDescription("Initialize the GTD workspace (creates folders and SQLite index). Use this if you get initialization/not found errors on first run. "+coachInstruction),
-	)
-	s.AddTool(initTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// --- Workspace ---
+	s.AddTool(mcp.NewTool("gtd_init",
+		mcp.WithDescription("Initialize the GTD workspace (dirs + SQLite index.db). Call once before other tools if the workspace is missing. "+coachInstruction),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return executeCLI("init")
 	})
 
-	addTool := mcp.NewTool("gtd_task_add",
-		mcp.WithDescription("Add a new task via NLP. "+coachInstruction),
-		mcp.WithString("text", mcp.Required(), mcp.Description("The task string (e.g. 'Email Bob @computer +Work')")),
-		mcp.WithString("project_id", mcp.Description("Optional project ID to associate")),
-		mcp.WithString("area_id", mcp.Description("Optional area ID to associate")),
-		mcp.WithString("assigned_to", mcp.Description("Optional person name/ID to assign to")),
-	)
-	s.AddTool(addTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments"), nil
+	s.AddTool(mcp.NewTool("gtd_index_rebuild",
+		mcp.WithDescription("Rebuild the SQLite index from markdown files on disk. Use after external file edits or as weekly-review step 1. "+coachInstruction),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return executeCLI("index", "rebuild")
+	})
+
+	// --- Task capture / update ---
+	s.AddTool(mcp.NewTool("gtd_task_add",
+		mcp.WithDescription("Capture a task via NLP quick-add. Default status is inbox unless text includes /next, /waiting, etc. NLP tokens: +project !area @context #tag %person /due: /start: /recur:. Structured overrides optional. "+coachInstruction),
+		mcp.WithString("text", mcp.Required(), mcp.Description("NLP task string, e.g. 'Email Bob @computer +Work /due:tomorrow'")),
+		mcp.WithString("project_id", mcp.Description("Optional project UUID override (sets project, clears area)")),
+		mcp.WithString("area_id", mcp.Description("Optional area UUID override (sets area, clears project)")),
+		mcp.WithString("area", mcp.Description("Optional area name override (sets area, clears project; area must already exist)")),
+		mcp.WithString("assigned_to", mcp.Description("Optional assignee name override")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, err := asArgsMap(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		text, _ := argsMap["text"].(string)
+		text := stringArg(m, "text")
 		args := []string{"task", "add", text}
-		if pid, ok := argsMap["project_id"].(string); ok && pid != "" {
-			args = append(args, "--project-id", pid)
-		}
-		if aid, ok := argsMap["area_id"].(string); ok && aid != "" {
-			args = append(args, "--area-id", aid)
-		}
-		if assign, ok := argsMap["assigned_to"].(string); ok && assign != "" {
-			args = append(args, "--assigned-to", assign)
-		}
+		args = appendFlagIfNonEmpty(args, m, "project_id", "--project-id")
+		args = appendFlagIfNonEmpty(args, m, "area_id", "--area-id")
+		args = appendFlagIfNonEmpty(args, m, "area", "--area")
+		args = appendFlagIfNonEmpty(args, m, "assigned_to", "--assigned-to")
 		return executeCLI(args...)
 	})
 
-	updateTool := mcp.NewTool("gtd_task_update",
-		mcp.WithDescription("Update a task's text or status. "+coachInstruction),
-		mcp.WithString("id", mcp.Required(), mcp.Description("The task ID")),
-		mcp.WithString("text", mcp.Description("Optional new NLP string to apply")),
-		mcp.WithString("status", mcp.Description("Optional new status to set")),
-		mcp.WithString("project_id", mcp.Description("Optional project ID to associate")),
-		mcp.WithString("area_id", mcp.Description("Optional area ID to associate")),
-		mcp.WithString("assigned_to", mcp.Description("Optional person name/ID to assign to")),
-		mcp.WithString("start_offset", mcp.Description("Optional start offset JSON")),
-	)
-	s.AddTool(updateTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments"), nil
+	s.AddTool(mcp.NewTool("gtd_task_update",
+		mcp.WithDescription("Clarify/organize a task: NLP text patch and/or structured fields. Completing to done/archived may return project_stalled + next_action_candidates. "+clearableHelp+" "+coachInstruction),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Task UUID")),
+		mcp.WithString("text", mcp.Description("Optional NLP string to merge (title, tokens, dates)")),
+		mcp.WithString("status", mcp.Description(taskStatusHelp)),
+		mcp.WithString("project_id", mcp.Description("Project UUID; empty string clears project. "+clearableHelp)),
+		mcp.WithString("area_id", mcp.Description("Area UUID; sets area and clears project; empty clears area. "+clearableHelp)),
+		mcp.WithString("area", mcp.Description("Area name; sets area and clears project; empty clears when used as clear. "+clearableHelp)),
+		mcp.WithString("assigned_to", mcp.Description("Assignee name; empty string clears. "+clearableHelp)),
+		mcp.WithString("start_offset", mcp.Description("Relative start offset: JSON {\"amount\":-1,\"unit\":\"day\"} or \"-1 day\"; empty clears. "+clearableHelp)),
+		mcp.WithString("recurrence", mcp.Description("Recurrence JSON e.g. {\"rule\":\"daily\"}; empty clears. "+clearableHelp)),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, err := asArgsMap(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		id, _ := argsMap["id"].(string)
+		id := stringArg(m, "id")
 		args := []string{"task", "update", id}
-		if text, ok := argsMap["text"].(string); ok && text != "" {
+		if text := stringArg(m, "text"); text != "" {
 			args = append(args, text)
 		}
-		if status, ok := argsMap["status"].(string); ok && status != "" {
-			args = append(args, "--status", status)
-		}
-		if pid, ok := argsMap["project_id"].(string); ok && pid != "" {
-			args = append(args, "--project-id", pid)
-		}
-		if aid, ok := argsMap["area_id"].(string); ok && aid != "" {
-			args = append(args, "--area-id", aid)
-		}
-		if assign, ok := argsMap["assigned_to"].(string); ok && assign != "" {
-			args = append(args, "--assigned-to", assign)
-		}
-		if off, ok := argsMap["start_offset"].(string); ok && off != "" {
-			args = append(args, "--start-offset", off)
-		}
+		args = appendFlagIfNonEmpty(args, m, "status", "--status")
+		args = appendFlagIfPresent(args, m, "project_id", "--project-id")
+		args = appendFlagIfPresent(args, m, "area_id", "--area-id")
+		args = appendFlagIfPresent(args, m, "area", "--area")
+		args = appendFlagIfPresent(args, m, "assigned_to", "--assigned-to")
+		args = appendFlagIfPresent(args, m, "start_offset", "--start-offset")
+		args = appendFlagIfPresent(args, m, "recurrence", "--recurrence")
 		return executeCLI(args...)
 	})
 
-	projectAddTool := mcp.NewTool("gtd_project_add",
-		mcp.WithDescription("Add a new project. "+coachInstruction),
-		mcp.WithString("title", mcp.Required(), mcp.Description("The project title")),
-		mcp.WithString("area_id", mcp.Description("Optional area ID to associate with the project")),
-		mcp.WithString("area", mcp.Description("Optional area name (creates the area if it does not exist)")),
-	)
-	s.AddTool(projectAddTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments"), nil
+	s.AddTool(mcp.NewTool("gtd_task_list",
+		mcp.WithDescription("List tasks by optional status and filters. Use for waiting/someday/reference/done or all active tasks. Prefer gtd_get_inbox / gtd_get_next / gtd_get_agenda for those specific views. "+filterParamsHelp+" "+coachInstruction),
+		mcp.WithString("status", mcp.Description(taskStatusHelp)),
+		mcp.WithString("area_id", mcp.Description("Filter by area UUID")),
+		mcp.WithString("area", mcp.Description("Filter by area name")),
+		mcp.WithString("project_id", mcp.Description("Filter by project UUID")),
+		mcp.WithString("project", mcp.Description("Filter by project title")),
+		mcp.WithString("context", mcp.Description("Filter by context")),
+		mcp.WithString("assigned_to", mcp.Description("Filter by assignee")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, err := asArgsMap(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		title, _ := argsMap["title"].(string)
-		args := []string{"project", "add", title}
-		if v, ok := argsMap["area_id"].(string); ok && v != "" {
-			args = append(args, "--area-id", v)
+		args := []string{"task", "list"}
+		if status := stringArg(m, "status"); status != "" {
+			args = append(args, status)
 		}
-		if v, ok := argsMap["area"].(string); ok && v != "" {
-			args = append(args, "--area", v)
-		}
+		args = appendTaskFilters(args, m)
 		return executeCLI(args...)
 	})
 
-	projectUpdateTool := mcp.NewTool("gtd_project_update",
-		mcp.WithDescription("Update a project's status. "+coachInstruction),
-		mcp.WithString("id", mcp.Required(), mcp.Description("The project ID")),
-		mcp.WithString("status", mcp.Required(), mcp.Description("The new status (e.g. active, completed, archived)")),
-	)
-	s.AddTool(projectUpdateTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		argsMap, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("invalid arguments"), nil
+	// --- Projects ---
+	s.AddTool(mcp.NewTool("gtd_project_add",
+		mcp.WithDescription("Create an active project (multi-step outcome). Optionally bind to an area by id or name (name creates area if missing). "+coachInstruction),
+		mcp.WithString("title", mcp.Required(), mcp.Description("Project title")),
+		mcp.WithString("area_id", mcp.Description("Optional area UUID")),
+		mcp.WithString("area", mcp.Description("Optional area name (creates area if it does not exist)")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, err := asArgsMap(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		id, _ := argsMap["id"].(string)
-		status, _ := argsMap["status"].(string)
-		return executeCLI("project", "update", id, "--status", status)
-	})
-
-	agendaTool := mcp.NewTool("gtd_get_agenda",
-		mcp.WithDescription("Get the user's agenda (due today, overdue). "+coachInstruction),
-		mcp.WithString("area_id", mcp.Description("Optional filter by Area ID")),
-		mcp.WithString("project_id", mcp.Description("Optional filter by Project ID")),
-		mcp.WithString("context", mcp.Description("Optional filter by Context")),
-		mcp.WithString("assigned_to", mcp.Description("Optional filter by Assigned To")),
-	)
-	s.AddTool(agendaTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		argsMap, _ := request.Params.Arguments.(map[string]interface{})
-		args := []string{"agenda"}
-		if v, ok := argsMap["area_id"].(string); ok && v != "" {
-			args = append(args, "--area-id", v)
-		}
-		if v, ok := argsMap["project_id"].(string); ok && v != "" {
-			args = append(args, "--project-id", v)
-		}
-		if v, ok := argsMap["context"].(string); ok && v != "" {
-			args = append(args, "--context", v)
-		}
-		if v, ok := argsMap["assigned_to"].(string); ok && v != "" {
-			args = append(args, "--assigned-to", v)
-		}
+		args := []string{"project", "add", stringArg(m, "title")}
+		args = appendFlagIfNonEmpty(args, m, "area_id", "--area-id")
+		args = appendFlagIfNonEmpty(args, m, "area", "--area")
 		return executeCLI(args...)
 	})
 
-	nextTool := mcp.NewTool("gtd_get_next",
-		mcp.WithDescription("Get the list of next actions. "+coachInstruction),
-		mcp.WithString("area_id", mcp.Description("Optional filter by Area ID")),
-		mcp.WithString("project_id", mcp.Description("Optional filter by Project ID")),
-		mcp.WithString("context", mcp.Description("Optional filter by Context")),
-		mcp.WithString("assigned_to", mcp.Description("Optional filter by Assigned To")),
-	)
-	s.AddTool(nextTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		argsMap, _ := request.Params.Arguments.(map[string]interface{})
-		args := []string{"next"}
-		if v, ok := argsMap["area_id"].(string); ok && v != "" {
-			args = append(args, "--area-id", v)
+	s.AddTool(mcp.NewTool("gtd_project_update",
+		mcp.WithDescription("Update project status and/or area. Provide at least one of status, area_id, area. Status optional: active | someday | completed | archived. "+clearableHelp+" "+coachInstruction),
+		mcp.WithString("id", mcp.Required(), mcp.Description("Project UUID")),
+		mcp.WithString("status", mcp.Description("Optional new status: active | someday | completed | archived")),
+		mcp.WithString("area_id", mcp.Description("Area UUID; empty string clears area. "+clearableHelp)),
+		mcp.WithString("area", mcp.Description("Area name (creates if missing); empty clears when key present. "+clearableHelp)),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, err := asArgsMap(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if v, ok := argsMap["project_id"].(string); ok && v != "" {
-			args = append(args, "--project-id", v)
-		}
-		if v, ok := argsMap["context"].(string); ok && v != "" {
-			args = append(args, "--context", v)
-		}
-		if v, ok := argsMap["assigned_to"].(string); ok && v != "" {
-			args = append(args, "--assigned-to", v)
-		}
+		args := []string{"project", "update", stringArg(m, "id")}
+		args = appendFlagIfNonEmpty(args, m, "status", "--status")
+		args = appendFlagIfPresent(args, m, "area_id", "--area-id")
+		args = appendFlagIfPresent(args, m, "area", "--area")
 		return executeCLI(args...)
 	})
 
-	stalledTool := mcp.NewTool("gtd_get_stalled",
-		mcp.WithDescription("Get a list of stalled projects (projects with no next actions). "+coachInstruction),
-	)
-	s.AddTool(stalledTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// --- Engage shortcuts ---
+	s.AddTool(mcp.NewTool("gtd_get_agenda",
+		mcp.WithDescription("Engage: tasks due today/overdue or start time reached (excludes reference). Date-only dues include all of due day. "+filterParamsHelp+" "+coachInstruction),
+		mcp.WithString("area_id", mcp.Description("Filter by area UUID")),
+		mcp.WithString("area", mcp.Description("Filter by area name")),
+		mcp.WithString("project_id", mcp.Description("Filter by project UUID")),
+		mcp.WithString("project", mcp.Description("Filter by project title")),
+		mcp.WithString("context", mcp.Description("Filter by context")),
+		mcp.WithString("assigned_to", mcp.Description("Filter by assignee")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, _ := asArgsMap(request)
+		args := appendTaskFilters([]string{"agenda"}, m)
+		return executeCLI(args...)
+	})
+
+	s.AddTool(mcp.NewTool("gtd_get_next",
+		mcp.WithDescription("Engage: list tasks with status next (immediately actionable). "+filterParamsHelp+" "+coachInstruction),
+		mcp.WithString("area_id", mcp.Description("Filter by area UUID")),
+		mcp.WithString("area", mcp.Description("Filter by area name")),
+		mcp.WithString("project_id", mcp.Description("Filter by project UUID")),
+		mcp.WithString("project", mcp.Description("Filter by project title")),
+		mcp.WithString("context", mcp.Description("Filter by context")),
+		mcp.WithString("assigned_to", mcp.Description("Filter by assignee")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		m, _ := asArgsMap(request)
+		args := appendTaskFilters([]string{"next"}, m)
+		return executeCLI(args...)
+	})
+
+	s.AddTool(mcp.NewTool("gtd_get_stalled",
+		mcp.WithDescription("Reflect: active projects with zero next-action tasks. Use in weekly review to unblock outcomes. "+coachInstruction),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return executeCLI("stalled")
 	})
-	
-	inboxTool := mcp.NewTool("gtd_get_inbox",
-		mcp.WithDescription("Get the list of unprocessed inbox items. "+coachInstruction),
-	)
-	s.AddTool(inboxTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+
+	s.AddTool(mcp.NewTool("gtd_get_inbox",
+		mcp.WithDescription("Clarify: list unprocessed inbox tasks. No filters. Process each with gtd_task_update. "+coachInstruction),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return executeCLI("inbox")
 	})
 
@@ -265,7 +350,11 @@ func registerTools(s *server.MCPServer) {
 }
 
 func executeCLI(args ...string) (*mcp.CallToolResult, error) {
-	cmd := exec.Command(os.Args[0], args...)
+	bin := gtdExecutable
+	if bin == "" {
+		bin = os.Args[0]
+	}
+	cmd := exec.Command(bin, args...)
 	cmd.Env = os.Environ()
 
 	out, err := cmd.CombinedOutput()

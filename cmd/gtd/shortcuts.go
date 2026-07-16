@@ -104,6 +104,22 @@ archived tasks are excluded. Default returns a JSON list of task IDs. Supports
 	},
 }
 
+// addCmd is a root shortcut for quick capture (same as `gtd task add`).
+// Flags and RunE must stay in sync with taskAddCmd.
+var addCmd = &cobra.Command{
+	Use:   "add <text>",
+	Short: "Shortcut for 'gtd task add'",
+	Long: `Quick-capture a task via the NLP quick-add parser.
+Same behavior as gtd task add — see that command for token syntax.
+
+Example:
+  gtd add "Email Bob about proposal %Bob @computer /due:tomorrow"`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return taskAddCmd.RunE(cmd, args)
+	},
+}
+
 func init() {
 	for _, c := range []*cobra.Command{nextCmd, agendaCmd} {
 		c.Flags().String("area-id", "", "Filter by Area ID")
@@ -114,6 +130,13 @@ func init() {
 		c.Flags().String("assigned-to", "", "Filter by Assigned To")
 	}
 
+	// Same optional bind flags as task add (cmd.Flags() is per-command).
+	addCmd.Flags().String("project-id", "", "Project ID")
+	addCmd.Flags().String("area-id", "", "Area ID")
+	addCmd.Flags().String("area", "", "Area name (sets area, clears project)")
+	addCmd.Flags().String("assigned-to", "", "Assigned To")
+
+	rootCmd.AddCommand(addCmd)
 	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(stalledCmd)

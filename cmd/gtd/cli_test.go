@@ -377,6 +377,31 @@ func TestCLI_Shortcuts(t *testing.T) {
 	if !foundStalled {
 		t.Errorf("expected to find stalled project ID %s in stalled list", projectID)
 	}
+
+	// Root `gtd add` is a shortcut for `gtd task add` (quick capture).
+	cmdAdd := exec.Command(cliPath, "add", "Captured via root shortcut")
+	cmdAdd.Env = env
+	outAdd, err := cmdAdd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected add shortcut to succeed, got error: %v, output: %s", err, outAdd)
+	}
+	var resAdd map[string]interface{}
+	if err := json.Unmarshal(outAdd, &resAdd); err != nil {
+		t.Fatalf("add shortcut: invalid JSON: %v, output: %s", err, outAdd)
+	}
+	if success, ok := resAdd["success"].(bool); !ok || !success {
+		t.Fatalf("expected add shortcut success, got: %s", outAdd)
+	}
+	addData, ok := resAdd["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected task object in add data, got: %s", outAdd)
+	}
+	if title, _ := addData["title"].(string); title != "Captured via root shortcut" {
+		t.Errorf("expected title from add shortcut, got %v", addData["title"])
+	}
+	if status, _ := addData["status"].(string); status != "inbox" {
+		t.Errorf("expected inbox status, got %v", addData["status"])
+	}
 }
 
 // TestCLI_HelpText_NoSectionsOrSavedFilters locks R14: init/index help no longer

@@ -2,6 +2,14 @@
 
 Welcome! This guide helps you set up your system, perform your initial massive capture, and structure your life domains.
 
+### Using the MCP server (AI agents)
+1. Call **`gtd_init`** once if the workspace is not initialized.
+2. Capture with **`gtd_task_add`** (same NLP tokens as CLI).
+3. Process with **`gtd_get_inbox`** and **`gtd_task_update`**.
+4. Read **`gtd://methodology`** for full SOPs and the tool catalog; use **`gtd://state`** for health counts.
+
+Human CLI equivalents: `gtd init`, `gtd task add`, `gtd inbox`, `gtd task update`.
+
 ---
 
 ## 1. Structuring Your System

@@ -1,72 +1,126 @@
-# GTD Agent Workflow & CLI Reference Guide
+# GTD Agent Workflow & MCP/CLI Reference Guide
 
-## Part 1: GTD Methodology Mapping & Core CLI Concepts
+Agents should use **MCP tools** (`gtd_*`). Humans may use the equivalent CLI. Both hit the same code path.
 
-| GTD Phase | Concept Description | CLI Mapping |
-| :--- | :--- | :--- |
-| **1. Capture** | Frictionless collection of open loops into a trusted inbox. | `gtd task add "<text>"` automatically starts in `inbox` status. |
-| **2. Clarify** | Deciding what each loop means and what concrete actions are needed. | Process `gtd inbox`. Apply 2-min rule, assign projects, or set statuses. |
-| **3. Organize** | Sorting tasks by context, project, area, and urgency constraints. | Update status (`next`, `waiting`, `someday`), contexts (`@computer`), tags (`#urgent`). |
-| **4. Reflect** | Reviewing the system weekly to keep it clean, accurate, and current. | `gtd stalled` identifies active projects missing active `next` action steps. |
-| **5. Engage** | Choosing the best action to perform right now under current constraints. | `gtd agenda` displays overdue / due-today actions; filter by context. |
+## Part 1: GTD Methodology Mapping
+
+| GTD Phase | Concept | MCP tool | CLI equivalent |
+| :--- | :--- | :--- | :--- |
+| **1. Capture** | Frictionless collection into inbox | `gtd_task_add` | `gtd add "<text>"` (or `gtd task add`) |
+| **2. Clarify** | Decide meaning and next action | `gtd_get_inbox` then `gtd_task_update` | `gtd inbox` / `gtd task update` |
+| **3. Organize** | Context, project, area, status | `gtd_task_update`, entity tools | `gtd task update`, `project`/`area`/`people` |
+| **4. Reflect** | Weekly review, unstick projects | `gtd_index_rebuild`, `gtd_get_stalled`, `gtd_task_list` | `index rebuild`, `stalled`, `task list` |
+| **5. Engage** | What to do now | `gtd://state`, `gtd_get_agenda`, `gtd_get_next` | `agenda`, `next` |
 
 ### Core Task Statuses
 * `inbox`: Raw, unprocessed loop.
 * `next`: Immediately actionable task.
-* `waiting`: Delegated task; requires an assignee (`assignedTo`) to track follow-up.
-* `someday`: Deferred idea/task; reviewed periodically but hidden from daily agenda.
-* `reference`: Informational note; date constraints are cleared but checklists/notes remain.
+* `waiting`: Delegated; track with `assigned_to` / `%person`.
+* `someday`: Deferred; hidden from daily agenda; review periodically.
+* `reference`: Informational note; schedule fields cleared.
 * `done`: Completed task.
 * `archived`: Finished historical tasks/projects.
 
 ---
 
 ## Part 2: Quick-Add NLP Parser Specification
-The parser scans the task title text for specific prefix tokens:
-1. **Projects (`+`)**: Binds the task to a project (e.g. `+Renovate Home`). Matches existing projects case-insensitively using a greedy matcher.
-2. **Areas (`!`)**: Binds the task to an Area of Focus (e.g. `!Finances`). Only applied if no project is assigned.
-3. **Contexts (`@`)**: Binds situational contexts (e.g. `@computer`, `@phone`).
-4. **Tags (`#`)**: General categorization tags (e.g. `#urgent`, `#groceries`).
-5. **Delegates (`%`)**: Assigns a delegate (e.g. `%Alice`).
-6. **Date Commands (`/`)**:
-   - `/due:<date>`: Sets due date. Supports `today`, `tomorrow`, `monday` (relative day) or exact `YYYY-MM-DD`.
-   - `/start:<date>`: Sets start date.
-   - `/review:<date>`: Sets next review date.
-7. **Status Commands (`/`)**:
-   - `/next`, `/someday`, `/waiting`, `/reference`: Sets the initial task status.
 
-*Example Input String:*
-`"Email backup proposal %Bob @computer +Work Migration /due:tomorrow"`
+Used by `gtd_task_add` and the optional `text` param on `gtd_task_update`:
+
+1. **Projects (`+`)**: Bind to project (e.g. `+Renovate_Home`). Matches existing projects case-insensitively.
+2. **Areas (`!`)**: Bind to Area of Focus (e.g. `!Finances`) when no project is set.
+3. **Contexts (`@`)**: Situational context (e.g. `@computer`, `@phone`).
+4. **Tags (`#`)**: Categories (e.g. `#urgent`).
+5. **Delegates (`%`)**: Assignee (e.g. `%Alice`).
+6. **Date Commands (`/`)**:
+   - `/due:<date>`: `today`, `tomorrow`, weekday, or `YYYY-MM-DD`
+   - `/start:<date>`, `/review:<date>`
+   - `/recur:…` where supported
+7. **Status Commands (`/`)**: `/next`, `/someday`, `/waiting`, `/reference`, `/done`
+
+*Example:* `"Email backup proposal %Bob @computer +Work_Migration /due:tomorrow"`
 
 ---
 
-## Part 3: Step-by-Step AI Agent SOPs
+## Part 3: MCP Conventions
 
-### SOP 1: Clarify & Process Inbox (Daily/On-Demand)
-1. Query `gtd inbox` to gather unprocessed items.
-2. For each task returned:
-   - If the task is actionable:
-     - **2-Minute Rule**: If the task takes <2 minutes, immediately prompt the user to execute it right now and record it as completed.
-     - **Delegate**: If someone else should do it, update status to `waiting` and assign a delegate:
-       `gtd task update <id> "%Bob /waiting"` (If Bob does not exist, add him first via `gtd people add Bob`).
-     - **Projects**: If it requires >1 step, bind it to an active project using `+ProjectName`.
-       - *Fallback*: If the project does not exist, create the project first: `gtd project add "Project Name"`, then update the task.
-     - **Next Action**: If it's a standalone immediate action, flag it: `gtd task update <id> "/next"`.
-   - If non-actionable:
-     - **Someday/Maybe**: Move to `someday`.
-     - **Reference**: Move to `reference`.
-     - **Delete**: Soft-delete useless tasks via `gtd task delete <id>`.
+### Shared list filters
+Optional on `gtd_task_list`, `gtd_get_agenda`, `gtd_get_next` (omit if unused):
+
+| Param | Meaning |
+| :--- | :--- |
+| `area_id` | Area UUID |
+| `area` | Area name |
+| `project_id` | Project UUID |
+| `project` | Project title |
+| `context` | Context string |
+| `assigned_to` | Person name |
+
+Prefer **names** when the user speaks names; use **IDs** from prior tool results.
+
+### Clearable fields (updates)
+On `gtd_task_update` / `gtd_project_update`:
+
+* **Omit** a key → leave field unchanged.
+* Pass **empty string `""`** → clear the field (where the CLI supports clear).
+
+Clearable on tasks: `project_id`, `area_id`, `area`, `assigned_to`, `start_offset`, `recurrence`.  
+Clearable on projects: `area_id`, `area`.
+
+### System health resource
+Read **`gtd://state`** for counts only (`inbox_count`, `next_count`, `agenda_count`, `stalled_project_count`, `waiting_count`, `someday_count`, `workspace_ok`, `errors`). Then call the matching query tool for full lists. Cache counts within a coaching turn.
+
+If tools fail with missing workspace errors, call **`gtd_init`** first.
+
+---
+
+## Part 4: Step-by-Step Agent SOPs
+
+### SOP 1: Clarify & Process Inbox
+1. `gtd_get_inbox` (or check `inbox_count` on `gtd://state`).
+2. For each task:
+   - **2-minute rule**: if trivial, prompt user to do it and set status `done` via `gtd_task_update`.
+   - **Delegate**: `gtd_people_add` if needed, then `gtd_task_update` with `status=waiting` and `assigned_to` (or NLP `"%Bob /waiting"` in `text`).
+   - **Multi-step**: `gtd_project_add` if needed, bind with `project_id` or NLP `+Project`.
+   - **Single next action**: `gtd_task_update` with `status=next` or text `/next`.
+   - **Non-actionable**: `status=someday` / `reference`, or `gtd_task_delete`.
 
 ### SOP 2: Reflect & Weekly Review
-Perform the weekly review to align focus, ensure data integrity, and unblock projects:
-1. Run `gtd index rebuild` to ensure the index database is fully consistent with the disk files.
-2. Run `gtd stalled` to fetch all active projects lacking concrete next actions.
-   - For each stalled project, fetch all candidate tasks belonging to it.
-   - Present these candidates to the user and prompt them to promote one to `/next` (e.g. `gtd task update <id> "/next"`) or add a new action step.
-3. Run `gtd task list waiting` to review pending delegations. Prompt the user for follow-ups if items have been sitting for too long.
-4. Run `gtd project list` and show active projects to the user, ensuring they are still relevant and not completed.
+1. `gtd_index_rebuild` — sync index after any external file edits.
+2. `gtd_get_stalled` — projects with zero `next` actions; for each, list candidates (`gtd_task_list` with `project_id`) and promote one to `next` or add a step.
+3. `gtd_task_list` with `status=waiting` — review delegations.
+4. `gtd_project_list` — still relevant?
+5. Optional: `gtd_task_list` with `status=someday`.
 
-### SOP 3: Engage (Agenda Execution)
-1. Run `gtd agenda` to retrieve all overdue and due-today tasks.
-2. Present the agenda to the user as their primary checklist.
-3. Allow the user to filter tasks by their current physical constraints (e.g., query tasks with context tag `@computer` or `@errand`) to matching current environments.
+### SOP 3: Engage
+1. Read `gtd://state` for counts.
+2. `gtd_get_agenda` as primary checklist (filter by `context` / `area` for environment).
+3. If agenda is empty, `gtd_get_next` with the same filters.
+4. Complete work with `gtd_task_update` (`status=done`); watch for `project_stalled` in the response.
+
+---
+
+## Part 5: MCP Tool Catalog
+
+| Tool | Purpose | Primary params |
+| :--- | :--- | :--- |
+| `gtd_init` | Bootstrap workspace | — |
+| `gtd_index_rebuild` | Resync SQLite from files | — |
+| `gtd_task_add` | Capture (NLP) | `text`; optional `project_id`, `area_id`, `area`, `assigned_to` |
+| `gtd_task_update` | Clarify / organize | `id`; optional `text`, `status`, clearable fields, `start_offset`, `recurrence` |
+| `gtd_task_list` | List by status/filters | optional `status` + shared filters |
+| `gtd_task_delete` / `gtd_task_restore` | Soft-delete / restore | `id` |
+| `gtd_task_duplicate` | Clone as next | `id` |
+| `gtd_task_promote` | Task → project | `id`, `project_title` |
+| `gtd_get_inbox` | Inbox list | — |
+| `gtd_get_next` | Next actions | shared filters |
+| `gtd_get_agenda` | Due/start now | shared filters |
+| `gtd_get_stalled` | Projects without next | — |
+| `gtd_project_add` | New project | `title`; optional `area_id`, `area` |
+| `gtd_project_update` | Status / area | `id`; optional `status`, `area_id`, `area` |
+| `gtd_project_list` / `delete` / `restore` | CRUD | `id` where needed |
+| `gtd_area_*` | Area CRUD + cascade | `name` / `id` |
+| `gtd_people_*` | People CRUD | `name` / `id` |
+
+Resources: `gtd://methodology`, `gtd://guides/getting_started`, `gtd://state`.  
+Prompt: `start_gtd_session`.
