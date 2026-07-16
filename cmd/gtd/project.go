@@ -189,6 +189,18 @@ Soft-deleted projects are hidden from normal list views.`,
 			return fmt.Errorf("sync project: %w", err)
 		}
 
+		// Persist cascade soft-deletes on child tasks.
+		for _, t := range tasks {
+			if t.ProjectID != nil && *t.ProjectID == project.ID {
+				if err := appCtx.taskRepo.Save(t); err != nil {
+					return fmt.Errorf("save cascaded task: %w", err)
+				}
+				if err := appCtx.syncEngine.SyncTask(context.Background(), t, now); err != nil {
+					return fmt.Errorf("sync cascaded task: %w", err)
+				}
+			}
+		}
+
 		printSuccess(project)
 		return nil
 	},

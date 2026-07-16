@@ -24,34 +24,32 @@ func (t *Task) DuplicateRecurringTask(newID string, completedAt time.Time, previ
 		strategy = "strict"
 	}
 
+	// Strict strategy advances one period from the existing schedule fields
+	// (matching Mindwtr createNextRecurringTask). Fluid advances from completedAt.
+	// Due dates intentionally do not "catch up" past completedAt — late completion
+	// still produces the calendar next occurrence (needed for month-end clamping).
 	var nextDue *time.Time
 	if t.DueDate != nil {
 		base := *t.DueDate
-		if strategy == "fluid" {
-			base = completedAt
-		}
 		anchor := dueAnchor
 		if strategy == "fluid" {
+			base = completedAt
 			anchor = 0
 		}
 		nd := nextDateFrom(base, rule, anchor)
-		if strategy == "strict" && !nd.After(completedAt) {
-			nd = nextDateFrom(completedAt, rule, dueAnchor)
-		}
 		nextDue = &nd
 	}
 
 	var nextStart *time.Time
 	if t.StartTime != nil {
 		base := *t.StartTime
-		if strategy == "fluid" {
-			base = completedAt
-		}
 		anchor := startAnchor
 		if strategy == "fluid" {
+			base = completedAt
 			anchor = 0
 		}
 		nd := nextDateFrom(base, rule, anchor)
+		// Mirror reference: only startTime has a late-completion catch-up in strict mode.
 		if strategy == "strict" && !nd.After(completedAt) {
 			nd = nextDateFrom(completedAt, rule, startAnchor)
 		}
@@ -61,17 +59,12 @@ func (t *Task) DuplicateRecurringTask(newID string, completedAt time.Time, previ
 	var nextReview *time.Time
 	if t.ReviewAt != nil {
 		base := *t.ReviewAt
-		if strategy == "fluid" {
-			base = completedAt
-		}
 		anchor := reviewAnchor
 		if strategy == "fluid" {
+			base = completedAt
 			anchor = 0
 		}
 		nd := nextDateFrom(base, rule, anchor)
-		if strategy == "strict" && !nd.After(completedAt) {
-			nd = nextDateFrom(completedAt, rule, reviewAnchor)
-		}
 		nextReview = &nd
 	}
 

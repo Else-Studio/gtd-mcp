@@ -86,6 +86,33 @@ var areaDeleteCmd = &cobra.Command{
 			return fmt.Errorf("sync area: %w", err)
 		}
 
+		// Persist cascade soft-deletes on child projects and tasks.
+		cascadedProjects := map[string]bool{}
+		for _, p := range projects {
+			if p.AreaID != nil && *p.AreaID == area.ID {
+				cascadedProjects[p.ID] = true
+				if err := appCtx.projectRepo.Save(p); err != nil {
+					return fmt.Errorf("save cascaded project: %w", err)
+				}
+				if err := appCtx.syncEngine.SyncProject(context.Background(), p); err != nil {
+					return fmt.Errorf("sync cascaded project: %w", err)
+				}
+			}
+		}
+		for _, t := range tasks {
+			underArea := t.AreaID != nil && *t.AreaID == area.ID
+			underCascadedProject := t.ProjectID != nil && cascadedProjects[*t.ProjectID]
+			if !underArea && !underCascadedProject {
+				continue
+			}
+			if err := appCtx.taskRepo.Save(t); err != nil {
+				return fmt.Errorf("save cascaded task: %w", err)
+			}
+			if err := appCtx.syncEngine.SyncTask(context.Background(), t, now); err != nil {
+				return fmt.Errorf("sync cascaded task: %w", err)
+			}
+		}
+
 		printSuccess(area)
 		return nil
 	},
@@ -193,16 +220,29 @@ var areaRestoreCmd = &cobra.Command{
 			return fmt.Errorf("sync area: %w", err)
 		}
 
+		cascadedProjects := map[string]bool{}
 		for _, p := range projects {
 			if p.AreaID != nil && *p.AreaID == area.ID {
-				appCtx.projectRepo.Save(p)
-				appCtx.syncEngine.SyncProject(context.Background(), p)
+				cascadedProjects[p.ID] = true
+				if err := appCtx.projectRepo.Save(p); err != nil {
+					return fmt.Errorf("save cascaded project: %w", err)
+				}
+				if err := appCtx.syncEngine.SyncProject(context.Background(), p); err != nil {
+					return fmt.Errorf("sync cascaded project: %w", err)
+				}
 			}
 		}
 		for _, t := range tasks {
-			if t.AreaID != nil && *t.AreaID == area.ID {
-				appCtx.taskRepo.Save(t)
-				appCtx.syncEngine.SyncTask(context.Background(), t, now)
+			underArea := t.AreaID != nil && *t.AreaID == area.ID
+			underCascadedProject := t.ProjectID != nil && cascadedProjects[*t.ProjectID]
+			if !underArea && !underCascadedProject {
+				continue
+			}
+			if err := appCtx.taskRepo.Save(t); err != nil {
+				return fmt.Errorf("save cascaded task: %w", err)
+			}
+			if err := appCtx.syncEngine.SyncTask(context.Background(), t, now); err != nil {
+				return fmt.Errorf("sync cascaded task: %w", err)
 			}
 		}
 

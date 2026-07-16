@@ -278,7 +278,7 @@ func TestE2E_Tester_DailyCaptureAndInbox(t *testing.T) {
 	}
 
 	// Move T3 to a project via NLP
-	runCmdJSON(t, wsDir, "task", "update", t3ID, "+Clean House /next")
+	runCmdJSON(t, wsDir, "task", "update", t3ID, `+"Clean House" /next`)
 
 	// Create a reference task
 	refRes := runCmdJSON(t, wsDir, "task", "add", "Meeting minutes @meeting /due:2026-07-15 /priority:high")
@@ -331,7 +331,7 @@ func TestE2E_Tester_ReflectAndStalled(t *testing.T) {
 	}
 
 	// 3. Add a next task to it
-	taskRes := runCmdJSON(t, wsDir, "task", "add", "Record intro +Launch Podcast /next")
+	taskRes := runCmdJSON(t, wsDir, "task", "add", `Record intro +"Launch Podcast" /next`)
 	taskData := taskRes["data"].(map[string]interface{})
 	taskID := taskData["id"].(string)
 
@@ -447,10 +447,10 @@ func TestE2E_Tester_Exploration1_AcmeOnboarding(t *testing.T) {
 	}
 
 	// 3. Add tasks
-	t1 := runCmdJSON(t, wsDir, "task", "add", "Prepare Acme consulting proposal +Acme Onboarding /next")
-	t2 := runCmdJSON(t, wsDir, "task", "add", "Research Acme background +Acme Onboarding /next")
-	t3 := runCmdJSON(t, wsDir, "task", "add", "Draft Acme project timeline +Acme Onboarding /someday")
-	t4 := runCmdJSON(t, wsDir, "task", "add", "Review Acme pricing structure with CFO +Acme Onboarding /waiting")
+	t1 := runCmdJSON(t, wsDir, "task", "add", `Prepare Acme consulting proposal +"Acme Onboarding" /next`)
+	t2 := runCmdJSON(t, wsDir, "task", "add", `Research Acme background +"Acme Onboarding" /next`)
+	t3 := runCmdJSON(t, wsDir, "task", "add", `Draft Acme project timeline +"Acme Onboarding" /someday`)
+	t4 := runCmdJSON(t, wsDir, "task", "add", `Review Acme pricing structure with CFO +"Acme Onboarding" /waiting`)
 
 	t1ID := t1["data"].(map[string]interface{})["id"].(string)
 	t2ID := t2["data"].(map[string]interface{})["id"].(string)
@@ -515,10 +515,12 @@ func TestE2E_Tester_Exploration2_KitchenRemodel(t *testing.T) {
 	runCmdJSON(t, wsDir, "project", "update", projID, "--area-id", areaID)
 
 	// 2. Add tasks
-	tA := runCmdJSON(t, wsDir, "task", "add", "Buy white paint +Kitchen Remodel /next")
+	tA := runCmdJSON(t, wsDir, "task", "add", `Buy white paint +"Kitchen Remodel" /next`)
 	tAID := tA["data"].(map[string]interface{})["id"].(string)
 
-	tB := runCmdJSON(t, wsDir, "task", "add", "Replace garage lightbulb !Home /next")
+	// Agenda only surfaces due/start ≤ now; give Task B an overdue due date so the
+	// area-filtered agenda assertion exercises real agenda rules (not undated next).
+	tB := runCmdJSON(t, wsDir, "task", "add", "Replace garage lightbulb !Home /next /due:2020-01-01")
 	tBID := tB["data"].(map[string]interface{})["id"].(string)
 
 	// 3. Move Task A to someday
@@ -664,8 +666,8 @@ func TestE2E_Tester_Exploration4_JapanVacation(t *testing.T) {
 	runCmdJSON(t, wsDir, "project", "update", projectID, "--status", "someday")
 
 	// 2. Add tasks
-	t1 := runCmdJSON(t, wsDir, "task", "add", "Research Kyoto temples +Trip to Japan /someday")
-	t2 := runCmdJSON(t, wsDir, "task", "add", "Book flights +Trip to Japan /someday")
+	t1 := runCmdJSON(t, wsDir, "task", "add", `Research Kyoto temples +"Trip to Japan" /someday`)
+	t2 := runCmdJSON(t, wsDir, "task", "add", `Book flights +"Trip to Japan" /someday`)
 
 	t1ID := t1["data"].(map[string]interface{})["id"].(string)
 	_ = t2["data"].(map[string]interface{})["id"].(string)
@@ -838,11 +840,13 @@ func TestE2E_Tester_Exploration7_ProductLaunch(t *testing.T) {
 	projID := projData["id"].(string)
 
 	// 2. Add 5 tasks
-	t1 := runCmdJSON(t, wsDir, "task", "add", "Prepare press release +Product Launch /next /due:2026-07-20")
-	t2 := runCmdJSON(t, wsDir, "task", "add", "Contact PR agency +Product Launch /next /due:2026-07-21")
-	t3 := runCmdJSON(t, wsDir, "task", "add", "Finalize product spec +Product Launch /next /due:2026-07-22")
-	t4 := runCmdJSON(t, wsDir, "task", "add", "Build website landing page +Product Launch /next /due:2026-07-23")
-	t5 := runCmdJSON(t, wsDir, "task", "add", "Launch product announcement +Product Launch /next /due:2026-07-24")
+	t1 := runCmdJSON(t, wsDir, "task", "add", `Prepare press release +"Product Launch" /next /due:2026-07-20`)
+	t2 := runCmdJSON(t, wsDir, "task", "add", `Contact PR agency +"Product Launch" /next /due:2026-07-21`)
+	t3 := runCmdJSON(t, wsDir, "task", "add", `Finalize product spec +"Product Launch" /next /due:2026-07-22`)
+	t4 := runCmdJSON(t, wsDir, "task", "add", `Build website landing page +"Product Launch" /next /due:2026-07-23`)
+	// Task 5 is not yet a next action so completing the last next (Task 4) correctly
+	// stalls the project and surfaces Task 5 as a promotion candidate.
+	t5 := runCmdJSON(t, wsDir, "task", "add", `Launch product announcement +"Product Launch" /someday /due:2026-07-24`)
 
 	t1Data := t1["data"].(map[string]interface{})
 	t1ID := t1Data["id"].(string)
@@ -925,7 +929,7 @@ func TestE2E_Tester_Exploration8_AreaCascade(t *testing.T) {
 	runCmdJSON(t, wsDir, "project", "update", projID, "--area-id", areaID)
 
 	// 3. Create Tasks
-	t1Res := runCmdJSON(t, wsDir, "task", "add", "Read Rust book +Learn Rust /next")
+	t1Res := runCmdJSON(t, wsDir, "task", "add", `Read Rust book +"Learn Rust" /next`)
 	t1ID := t1Res["data"].(map[string]interface{})["id"].(string)
 	
 	t2Res := runCmdJSON(t, wsDir, "task", "add", "Register for course !Education /next")
@@ -1139,7 +1143,7 @@ func TestE2E_Tester_Exploration14_ArchivedProjectTaskRestriction(t *testing.T) {
 	projID := projRes["data"].(map[string]interface{})["id"].(string)
 
 	// Add Task 1 (pre-archived)
-	t1Res := runCmdJSON(t, wsDir, "task", "add", "Write specs +Launch App /next")
+	t1Res := runCmdJSON(t, wsDir, "task", "add", `Write specs +"Launch App" /next`)
 	t1ID := t1Res["data"].(map[string]interface{})["id"].(string)
 
 	// 2. Archive project
@@ -1147,7 +1151,7 @@ func TestE2E_Tester_Exploration14_ArchivedProjectTaskRestriction(t *testing.T) {
 	runCmdJSON(t, wsDir, "index", "rebuild")
 
 	// 3. Try adding new task to archived project (strictly expected to fail validation)
-	taskAddOutput, err := runCmdWithEnv(wsDir, "task", "add", "Write release notes +Launch App /next")
+	taskAddOutput, err := runCmdWithEnv(wsDir, "task", "add", `Write release notes +"Launch App" /next`)
 	if err == nil {
 		t.Errorf("expected task add to archived project container to fail validation, got output: %s", taskAddOutput)
 	}

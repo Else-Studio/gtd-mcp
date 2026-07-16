@@ -50,8 +50,16 @@ func (f *TaskQueryFilter) Apply(query string, args []interface{}) (string, []int
 		return query, args
 	}
 	if f.AreaID != "" {
-		query += " AND areaId = ?"
-		args = append(args, f.AreaID)
+		// Direct area tasks, or tasks whose project belongs to the area
+		// (container exclusivity: project tasks clear areaId but inherit via project).
+		query += ` AND (
+			areaId = ?
+			OR projectId IN (
+				SELECT id FROM projects
+				WHERE areaId = ? AND deletedAt IS NULL
+			)
+		)`
+		args = append(args, f.AreaID, f.AreaID)
 	}
 	if f.ProjectID != "" {
 		query += " AND projectId = ?"
@@ -98,6 +106,11 @@ func (q *TaskQuery) ListActiveTasks(ctx context.Context, filter *TaskQueryFilter
 
 // ListTasksByStatus queries tasks matching a specific status.
 func (q *TaskQuery) ListTasksByStatus(ctx context.Context, status string, filter *TaskQueryFilter) ([]string, error) {
+	// Next-action lists exclude tasks whose parent project is someday/archived/deleted.
+	if status == string(domain.TaskStatusNext) {
+		return q.listNextTasksFiltered(ctx, filter)
+	}
+
 	query := `
 		SELECT id 
 		FROM tasks 
@@ -110,6 +123,84 @@ func (q *TaskQuery) ListTasksByStatus(ctx context.Context, status string, filter
 	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks by status: %w", err)
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// listNextTasksFiltered returns non-deleted next tasks, excluding those under
+// someday/archived/deleted projects (loose tasks with no project remain eligible).
+func (q *TaskQuery) listNextTasksFiltered(ctx context.Context, filter *TaskQueryFilter) ([]string, error) {
+	query := `
+		SELECT t.id
+		FROM tasks t
+		LEFT JOIN projects p ON t.projectId = p.id
+		WHERE t.deletedAt IS NULL
+		  AND t.status = 'next'
+		  AND (
+		      t.projectId IS NULL
+		      OR (
+		          p.id IS NOT NULL
+		          AND p.deletedAt IS NULL
+		          AND p.status NOT IN ('someday', 'archived')
+		      )
+		  )
+	`
+	args := []interface{}{}
+	// Re-apply optional filters against the tasks alias.
+	if filter != nil {
+		if filter.AreaID != "" {
+			query += ` AND (
+				t.areaId = ?
+				OR t.projectId IN (
+					SELECT id FROM projects
+					WHERE areaId = ? AND deletedAt IS NULL
+				)
+			)`
+			args = append(args, filter.AreaID, filter.AreaID)
+		}
+		if filter.ProjectID != "" {
+			query += " AND t.projectId = ?"
+			args = append(args, filter.ProjectID)
+		}
+		if filter.Context != "" {
+			query += " AND EXISTS (SELECT 1 FROM json_each(t.contexts) WHERE value = ?)"
+			args = append(args, filter.Context)
+		}
+		if filter.AssignedTo != "" {
+			query += " AND t.assignedTo = ?"
+			args = append(args, filter.AssignedTo)
+		}
+	}
+	// DefaultSortSQL references bare column names; qualify for the join query.
+	query += `
+ORDER BY
+	CASE t.status
+		WHEN 'inbox' THEN 1
+		WHEN 'next' THEN 2
+		WHEN 'waiting' THEN 3
+		WHEN 'someday' THEN 4
+		WHEN 'reference' THEN 5
+		WHEN 'done' THEN 6
+		WHEN 'archived' THEN 7
+		ELSE 8
+	END ASC,
+	t.dueDate ASC,
+	t.createdAt ASC
+`
+
+	rows, err := q.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query next tasks: %w", err)
 	}
 	defer rows.Close()
 
@@ -214,12 +305,15 @@ func (q *TaskQuery) ListAgendaTasks(ctx context.Context, now time.Time, filter *
 	return ids, rows.Err()
 }
 
-// GetProjectCandidates fetches non-deleted tasks for a project that are not done or archived.
+// GetProjectCandidates fetches open tasks that could be promoted to next:
+// non-deleted, not done/archived/reference, and not already next.
 func (q *TaskQuery) GetProjectCandidates(ctx context.Context, projectID string) ([]domain.Task, error) {
 	query := `
 		SELECT id, title, createdAt 
 		FROM tasks 
-		WHERE deletedAt IS NULL AND projectId = ? AND status NOT IN ('done', 'archived')
+		WHERE deletedAt IS NULL
+		  AND projectId = ?
+		  AND status NOT IN ('done', 'archived', 'reference', 'next')
 		ORDER BY createdAt ASC
 	`
 	rows, err := q.db.QueryContext(ctx, query, projectID)

@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,7 +13,6 @@ import (
 	"gtd/internal/domain"
 	"gtd/internal/parser"
 	"gtd/internal/persistence/sqlite"
-	"encoding/json"
 )
 
 
@@ -93,8 +95,17 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 		if parsed.EnergyLevel != nil {
 			task.EnergyLevel = *parsed.EnergyLevel
 		}
+		if parsed.Priority != nil {
+			task.Priority = *parsed.Priority
+		}
+		if parsed.Recurrence != nil {
+			task.Recurrence = parsed.Recurrence
+		}
 
 		if parsed.ProjectTitle != nil {
+			if err := rejectArchivedProjectByTitle(appCtx, *parsed.ProjectTitle); err != nil {
+				return err
+			}
 			project := &domain.Project{
 				ID:        uuid.New().String(),
 				Title:     *parsed.ProjectTitle,
@@ -151,6 +162,10 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 			task.AssignedTo = assignedTo
 		}
 
+		if err := rejectArchivedProject(appCtx, task.ProjectID); err != nil {
+			return err
+		}
+
 		if err := appCtx.taskRepo.Save(task); err != nil {
 			return fmt.Errorf("save task: %w", err)
 		}
@@ -196,8 +211,10 @@ Example:
 			return fmt.Errorf("task not found: %w", err)
 		}
 
+		// Capture status before any mutation for recurrence side-effects.
+		previousStatus := task.Status
 		now := time.Now()
-		
+
 		if text != "" {
 			catalog, err := appCtx.taskQuery.GetEntityCatalog(context.Background())
 			if err != nil {
@@ -209,7 +226,12 @@ Example:
 					task.Title = parsed.Title
 				}
 				if parsed.Status != nil {
-					task.UpdateStatus(*parsed.Status, now)
+					if *parsed.Status == domain.TaskStatusReference {
+						task.SetReference()
+						task.UpdateStatus(domain.TaskStatusReference, now)
+					} else {
+						task.UpdateStatus(*parsed.Status, now)
+					}
 				}
 				if len(parsed.Contexts) > 0 {
 					task.Contexts = parsed.Contexts
@@ -218,6 +240,9 @@ Example:
 					task.Tags = parsed.Tags
 				}
 				if parsed.ProjectTitle != nil {
+					if err := rejectArchivedProjectByTitle(appCtx, *parsed.ProjectTitle); err != nil {
+						return err
+					}
 					project := &domain.Project{
 						ID:        uuid.New().String(),
 						Title:     *parsed.ProjectTitle,
@@ -272,11 +297,18 @@ Example:
 				if parsed.EnergyLevel != nil {
 					task.EnergyLevel = *parsed.EnergyLevel
 				}
+				if parsed.Priority != nil {
+					task.Priority = *parsed.Priority
+				}
+				if parsed.Recurrence != nil {
+					task.Recurrence = parsed.Recurrence
+				}
+				// Use domain helpers so relative start offsets recompute with due-date changes.
 				if parsed.DueDate != nil {
-					task.DueDate = parsed.DueDate
+					task.UpdateDueDate(parsed.DueDate)
 				}
 				if parsed.StartTime != nil {
-					task.StartTime = parsed.StartTime
+					task.UpdateStartTime(parsed.StartTime)
 				}
 				if parsed.ReviewAt != nil {
 					task.ReviewAt = parsed.ReviewAt
@@ -318,16 +350,39 @@ Example:
 			if offsetStr == "" {
 				task.UpdateRelativeStartOffset(nil)
 			} else {
-				var offset domain.RelativeOffset
-				if err := json.Unmarshal([]byte(offsetStr), &offset); err == nil {
-					task.UpdateRelativeStartOffset(&offset)
+				offset, err := parseStartOffset(offsetStr)
+				if err != nil {
+					return fmt.Errorf("invalid --start-offset: %w", err)
 				}
+				task.UpdateRelativeStartOffset(offset)
 			}
+		}
+		if cmd.Flags().Changed("recurrence") {
+			recStr, _ := cmd.Flags().GetString("recurrence")
+			if recStr == "" {
+				task.Recurrence = nil
+			} else {
+				var rule domain.RecurrenceRule
+				if err := json.Unmarshal([]byte(recStr), &rule); err != nil {
+					return fmt.Errorf("invalid --recurrence JSON: %w", err)
+				}
+				task.Recurrence = &rule
+			}
+			task.UpdatedAt = time.Now()
 		}
 
 		status, _ := cmd.Flags().GetString("status")
 		if status != "" {
-			task.UpdateStatus(domain.TaskStatus(status), time.Now())
+			if status == string(domain.TaskStatusReference) {
+				task.SetReference()
+				task.UpdateStatus(domain.TaskStatusReference, time.Now())
+			} else {
+				task.UpdateStatus(domain.TaskStatus(status), time.Now())
+			}
+		}
+
+		if err := rejectArchivedProject(appCtx, task.ProjectID); err != nil {
+			return err
 		}
 
 		if err := appCtx.taskRepo.Save(task); err != nil {
@@ -339,12 +394,25 @@ Example:
 			return fmt.Errorf("sync task: %w", err)
 		}
 
+		// Recurring task automation: completing a recurring task spawns the next occurrence.
+		if (task.Status == domain.TaskStatusDone || task.Status == domain.TaskStatusArchived) && task.Recurrence != nil {
+			nextTask := task.DuplicateRecurringTask(uuid.New().String(), now, previousStatus)
+			if nextTask != nil {
+				if err := appCtx.taskRepo.Save(nextTask); err != nil {
+					return fmt.Errorf("save next recurring occurrence: %w", err)
+				}
+				if err := appCtx.syncEngine.SyncTask(context.Background(), nextTask, now); err != nil {
+					return fmt.Errorf("sync next recurring occurrence: %w", err)
+				}
+			}
+		}
+
 		var respData map[string]interface{}
-		
+
 		// Project stall logic
 		projectStalled := false
 		var candidates []domain.Task
-		
+
 		if (task.Status == domain.TaskStatusDone || task.Status == domain.TaskStatusArchived) && task.ProjectID != nil {
 			ctx := context.Background()
 			isActive, err := appCtx.taskQuery.IsProjectActive(ctx, *task.ProjectID)
@@ -368,8 +436,8 @@ Example:
 
 		if projectStalled {
 			respData = map[string]interface{}{
-				"task": task,
-				"project_stalled": true,
+				"task":                   task,
+				"project_stalled":        true,
 				"next_action_candidates": candidates,
 			}
 		} else {
@@ -381,6 +449,67 @@ Example:
 		printSuccess(respData)
 		return nil
 	},
+}
+
+// rejectArchivedProject blocks task create/update when the container project is archived.
+func rejectArchivedProject(appCtx *appContext, projectID *string) error {
+	if projectID == nil || *projectID == "" {
+		return nil
+	}
+	project, err := appCtx.projectRepo.Get(*projectID)
+	if err != nil {
+		return nil // missing project is not this rule's concern
+	}
+	if project.Status == domain.ProjectStatusArchived {
+		return fmt.Errorf("%w: cannot create or update tasks under archived project %q", domain.ErrValidation, project.Title)
+	}
+	return nil
+}
+
+// rejectArchivedProjectByTitle blocks auto-creating a twin project when an archived
+// project with the same title already exists (catalog omits archived, so NLP would
+// otherwise spawn a new active project with the same name).
+func rejectArchivedProjectByTitle(appCtx *appContext, title string) error {
+	projects, err := appCtx.projectRepo.List()
+	if err != nil {
+		return fmt.Errorf("list projects: %w", err)
+	}
+	for _, p := range projects {
+		if p.DeletedAt != nil {
+			continue
+		}
+		if p.Title == title && p.Status == domain.ProjectStatusArchived {
+			return fmt.Errorf("%w: cannot create or update tasks under archived project %q", domain.ErrValidation, title)
+		}
+	}
+	return nil
+}
+
+// parseStartOffset accepts either JSON ({"amount":-1,"unit":"day"}) or a human
+// form like "-1 day" / "-30 minute".
+func parseStartOffset(s string) (*domain.RelativeOffset, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	var offset domain.RelativeOffset
+	if err := json.Unmarshal([]byte(s), &offset); err == nil && offset.Unit != "" {
+		return &offset, nil
+	}
+	parts := strings.Fields(s)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("expected JSON or \"<amount> <unit>\" (e.g. \"-1 day\"), got %q", s)
+	}
+	amount, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid amount %q: %w", parts[0], err)
+	}
+	unit := strings.ToLower(parts[1])
+	// Normalize plural units (days → day, minutes → minute).
+	if strings.HasSuffix(unit, "s") && unit != "s" {
+		unit = strings.TrimSuffix(unit, "s")
+	}
+	return &domain.RelativeOffset{Amount: amount, Unit: unit}, nil
 }
 
 var taskDeleteCmd = &cobra.Command{
@@ -485,6 +614,173 @@ By default, returns a JSON list of task IDs. When --plain is specified, returns 
 	},
 }
 
+var taskDuplicateCmd = &cobra.Command{
+	Use:   "duplicate <id>",
+	Short: "Duplicate a task",
+	Long: `Deep-copies a task with a new unique ID.
+Resets status to 'next' and clears completedAt so the clone is actionable.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		appCtx, err := getAppContext()
+		if err != nil {
+			return err
+		}
+		defer appCtx.cleanup()
+
+		orig, err := appCtx.taskRepo.Get(id)
+		if err != nil {
+			return fmt.Errorf("task not found: %w", err)
+		}
+
+		now := time.Now()
+		clone := *orig
+		clone.ID = uuid.New().String()
+		clone.CreatedAt = now
+		clone.UpdatedAt = now
+		clone.DeletedAt = nil
+
+		// Deep-copy slices so clone and original do not share backing arrays.
+		if orig.Tags != nil {
+			clone.Tags = append([]string(nil), orig.Tags...)
+		}
+		if orig.Contexts != nil {
+			clone.Contexts = append([]string(nil), orig.Contexts...)
+		}
+		if orig.Attachments != nil {
+			clone.Attachments = append([]domain.Attachment(nil), orig.Attachments...)
+		}
+		if orig.Recurrence != nil {
+			r := *orig.Recurrence
+			clone.Recurrence = &r
+		}
+		if orig.RelativeStartOffset != nil {
+			o := *orig.RelativeStartOffset
+			clone.RelativeStartOffset = &o
+		}
+		if orig.DueDate != nil {
+			d := *orig.DueDate
+			clone.DueDate = &d
+		}
+		if orig.StartTime != nil {
+			s := *orig.StartTime
+			clone.StartTime = &s
+		}
+		if orig.ReviewAt != nil {
+			r := *orig.ReviewAt
+			clone.ReviewAt = &r
+		}
+		if orig.ProjectID != nil {
+			p := *orig.ProjectID
+			clone.ProjectID = &p
+		}
+		if orig.AreaID != nil {
+			a := *orig.AreaID
+			clone.AreaID = &a
+		}
+
+		clone.UpdateStatus(domain.TaskStatusNext, now)
+		clone.CompletedAt = nil
+
+		if err := appCtx.taskRepo.Save(&clone); err != nil {
+			return fmt.Errorf("save duplicated task: %w", err)
+		}
+		if err := appCtx.syncEngine.SyncTask(context.Background(), &clone, now); err != nil {
+			return fmt.Errorf("sync duplicated task: %w", err)
+		}
+
+		printSuccess(map[string]interface{}{
+			"task": &clone,
+		})
+		return nil
+	},
+}
+
+var taskPromoteCmd = &cobra.Command{
+	Use:   "promote <id> <project_title>",
+	Short: "Promote a task to a project",
+	Long: `Creates a new project with the given title and links the task to it.
+Clears the task's area association (container exclusivity). The task is preserved as the first step.`,
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		title := args[1]
+		appCtx, err := getAppContext()
+		if err != nil {
+			return err
+		}
+		defer appCtx.cleanup()
+
+		task, err := appCtx.taskRepo.Get(id)
+		if err != nil {
+			return fmt.Errorf("task not found: %w", err)
+		}
+
+		now := time.Now()
+
+		// Reuse an existing active (non-archived, non-deleted) project with the same title
+		// in the same area when possible.
+		var project *domain.Project
+		projects, err := appCtx.projectRepo.List()
+		if err != nil {
+			return fmt.Errorf("list projects: %w", err)
+		}
+		for _, p := range projects {
+			if p.DeletedAt != nil || p.Status == domain.ProjectStatusArchived {
+				continue
+			}
+			if p.Title != title {
+				continue
+			}
+			// Same area: both nil, or both point to the same area ID.
+			sameArea := (p.AreaID == nil && task.AreaID == nil) ||
+				(p.AreaID != nil && task.AreaID != nil && *p.AreaID == *task.AreaID)
+			if sameArea {
+				project = p
+				break
+			}
+		}
+
+		if project == nil {
+			project = &domain.Project{
+				ID:        uuid.New().String(),
+				Title:     title,
+				Status:    domain.ProjectStatusActive,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			// Inherit the task's area when creating a new project.
+			if task.AreaID != nil {
+				areaID := *task.AreaID
+				project.AreaID = &areaID
+			}
+			if err := appCtx.projectRepo.Save(project); err != nil {
+				return fmt.Errorf("save new project: %w", err)
+			}
+			if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
+				return fmt.Errorf("sync new project: %w", err)
+			}
+		}
+
+		task.ProjectID = &project.ID
+		task.AreaID = nil
+		task.UpdatedAt = now
+
+		if err := appCtx.taskRepo.Save(task); err != nil {
+			return fmt.Errorf("save task: %w", err)
+		}
+		if err := appCtx.syncEngine.SyncTask(context.Background(), task, now); err != nil {
+			return fmt.Errorf("sync task: %w", err)
+		}
+
+		printSuccess(map[string]interface{}{
+			"project_id": project.ID,
+			"task":       task,
+		})
+		return nil
+	},
+}
+
 func buildTaskQueryFilter(cmd *cobra.Command, appCtx *appContext) *sqlite.TaskQueryFilter {
 	filter := &sqlite.TaskQueryFilter{}
 
@@ -531,7 +827,8 @@ func init() {
 	taskUpdateCmd.Flags().String("project-id", "", "Project ID")
 	taskUpdateCmd.Flags().String("area-id", "", "Area ID")
 	taskUpdateCmd.Flags().String("assigned-to", "", "Assigned To")
-	taskUpdateCmd.Flags().String("start-offset", "", "Start Offset JSON")
+	taskUpdateCmd.Flags().String("start-offset", "", "Relative start offset (JSON or \"-1 day\")")
+	taskUpdateCmd.Flags().String("recurrence", "", "Recurrence rule JSON (e.g. {\"rule\":\"daily\"})")
 
 	taskListCmd.Flags().String("area-id", "", "Filter by Area ID")
 	taskListCmd.Flags().String("area", "", "Filter by Area Name")
@@ -545,6 +842,8 @@ func init() {
 	taskCmd.AddCommand(taskDeleteCmd)
 	taskCmd.AddCommand(taskRestoreCmd)
 	taskCmd.AddCommand(taskListCmd)
+	taskCmd.AddCommand(taskDuplicateCmd)
+	taskCmd.AddCommand(taskPromoteCmd)
 
 	rootCmd.AddCommand(taskCmd)
 }

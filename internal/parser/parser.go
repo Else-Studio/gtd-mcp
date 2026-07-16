@@ -32,6 +32,7 @@ type ParseResult struct {
 	ReviewAt            *time.Time
 	Description         *string
 	Attachments         []domain.Attachment
+	Recurrence          *domain.RecurrenceRule
 	InvalidDateCommands []string
 }
 
@@ -177,6 +178,9 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 					case "someday":
 						st := domain.TaskStatusSomeday
 						res.Status = &st
+					case "reference":
+						st := domain.TaskStatusReference
+						res.Status = &st
 					case "done":
 						st := domain.TaskStatusDone
 						res.Status = &st
@@ -186,6 +190,14 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 					case "energy":
 						low := strings.ToLower(val)
 						res.EnergyLevel = &low
+					case "priority":
+						low := strings.ToLower(val)
+						res.Priority = &low
+					case "recur", "recurrence":
+						rule := strings.ToLower(strings.TrimSpace(val))
+						if rule != "" {
+							res.Recurrence = &domain.RecurrenceRule{Rule: rule}
+						}
 					case "note":
 						res.Description = &val
 					case "link":
@@ -322,31 +334,42 @@ func unescape(s string) string {
 }
 
 func parseDateCommand(val string, now time.Time) *time.Time {
-	val = strings.ToLower(strings.TrimSpace(val))
-	if val == "tomorrow" {
+	raw := strings.TrimSpace(val)
+	lower := strings.ToLower(raw)
+	if lower == "tomorrow" {
 		t := now.AddDate(0, 0, 1)
 		// Date only
 		t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 		return &t
 	}
-	if strings.HasPrefix(val, "tomorrow ") {
+	if strings.HasPrefix(lower, "tomorrow ") {
 		// "tomorrow 5pm" - simplified parse
 		t := now.AddDate(0, 0, 1)
-		if strings.Contains(val, "5pm") {
+		if strings.Contains(lower, "5pm") {
 			t = time.Date(t.Year(), t.Month(), t.Day(), 17, 0, 0, 0, t.Location())
 			return &t
 		}
 	}
-	if val == "next week" {
+	if lower == "next week" {
 		t := now.AddDate(0, 0, 7)
 		t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 		return &t
 	}
-	// Try parsing standard YYYY-MM-DD
-	if t, err := time.Parse("2006-01-02", val); err == nil {
+	// RFC3339 / ISO-8601 with time (preserve original casing for Z/offsets)
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
 		return &t
 	}
-	
+	if t, err := time.Parse("2006-01-02T15:04:05Z07:00", raw); err == nil {
+		return &t
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05", raw); err == nil {
+		return &t
+	}
+	// Standard YYYY-MM-DD (date-only)
+	if t, err := time.Parse("2006-01-02", lower); err == nil {
+		return &t
+	}
+
 	// Fallback to not parsed for this example
 	return nil
 }

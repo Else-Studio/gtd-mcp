@@ -70,7 +70,7 @@ func TestE2E_TaskProjectLifecycle(t *testing.T) {
 	}
 
 	// 4. Assign task to project
-	runCmdE2E(t, workspaceDir, "task", "update", taskID, "+Build E2E Tests")
+	runCmdE2E(t, workspaceDir, "task", "update", taskID, `+"Build E2E Tests"`)
 
 	// 5. Complete the task (this should trigger project_stalled)
 	finalResult := runCmdE2E(t, workspaceDir, "task", "update", taskID, "--status", "done")
@@ -118,8 +118,8 @@ func TestE2E_ComprehensiveFlow(t *testing.T) {
 	runCmdE2E(t, workspaceDir, "project", "add", "Learn Go")
 
 	// 3. Add tasks with different syntax
-	runCmdE2E(t, workspaceDir, "task", "add", "Buy paint +Home Renovation @errand #weekend /next /due:2000-01-01")
-	runCmdE2E(t, workspaceDir, "task", "add", "Read Go tutorials +Learn Go @computer /next")
+	runCmdE2E(t, workspaceDir, "task", "add", `Buy paint +"Home Renovation" @errand #weekend /next /due:2000-01-01`)
+	runCmdE2E(t, workspaceDir, "task", "add", `Read Go tutorials +"Learn Go" @computer /next`)
 	runCmdE2E(t, workspaceDir, "task", "add", "General inbox idea without tags")
 	
 	// Create a task to be deleted
@@ -219,7 +219,7 @@ func TestE2E_AutoCreateProjectAndArea(t *testing.T) {
 	runCmdE2E(t, workspaceDir, "init")
 
 	// 2. Add task with a new project using +
-	taskResult := runCmdE2E(t, workspaceDir, "task", "add", "Task with new project +Brand New Project")
+	taskResult := runCmdE2E(t, workspaceDir, "task", "add", `Task with new project +"Brand New Project"`)
 	taskOutput, ok := taskResult["data"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected task object in data")
@@ -253,7 +253,7 @@ func TestE2E_AutoCreateProjectAndArea(t *testing.T) {
 	}
 
 	// 3. Add task with a new area using !
-	taskResult2 := runCmdE2E(t, workspaceDir, "task", "add", "Task with new area !Brand New Area")
+	taskResult2 := runCmdE2E(t, workspaceDir, "task", "add", `Task with new area !"Brand New Area"`)
 	taskOutput2, ok := taskResult2["data"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected task object in data")
