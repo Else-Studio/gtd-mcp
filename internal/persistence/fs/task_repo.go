@@ -32,7 +32,6 @@ type taskFrontmatter struct {
 	Attachments         []domain.Attachment    `yaml:"attachments,omitempty"`
 	Location            string                 `yaml:"location,omitempty"`
 	ProjectID           *string                `yaml:"projectId,omitempty"`
-	SectionID           *string                `yaml:"sectionId,omitempty"`
 	AreaID              *string                `yaml:"areaId,omitempty"`
 	OrderNum            int                    `yaml:"orderNum,omitempty"`
 	TimeEstimate        string                 `yaml:"timeEstimate,omitempty"`
@@ -71,7 +70,6 @@ func (c *taskCodec) Encode(task *domain.Task, now time.Time) ([]byte, string, st
 		Attachments:         task.Attachments,
 		Location:            task.Location,
 		ProjectID:           task.ProjectID,
-		SectionID:           task.SectionID,
 		AreaID:              task.AreaID,
 		OrderNum:            task.OrderNum,
 		TimeEstimate:        task.TimeEstimate,
@@ -129,7 +127,6 @@ func (c *taskCodec) Decode(id, title, desc string, frontmatter []byte, now time.
 		Attachments:         fm.Attachments,
 		Location:            fm.Location,
 		ProjectID:           fm.ProjectID,
-		SectionID:           fm.SectionID,
 		AreaID:              fm.AreaID,
 		OrderNum:            fm.OrderNum,
 		TimeEstimate:        fm.TimeEstimate,

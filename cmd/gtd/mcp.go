@@ -99,6 +99,9 @@ func registerTools(s *server.MCPServer) {
 	addTool := mcp.NewTool("gtd_task_add",
 		mcp.WithDescription("Add a new task via NLP. "+coachInstruction),
 		mcp.WithString("text", mcp.Required(), mcp.Description("The task string (e.g. 'Email Bob @computer +Work')")),
+		mcp.WithString("project_id", mcp.Description("Optional project ID to associate")),
+		mcp.WithString("area_id", mcp.Description("Optional area ID to associate")),
+		mcp.WithString("assigned_to", mcp.Description("Optional person name/ID to assign to")),
 	)
 	s.AddTool(addTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		argsMap, ok := request.Params.Arguments.(map[string]interface{})
@@ -106,7 +109,17 @@ func registerTools(s *server.MCPServer) {
 			return mcp.NewToolResultError("invalid arguments"), nil
 		}
 		text, _ := argsMap["text"].(string)
-		return executeCLI("task", "add", text)
+		args := []string{"task", "add", text}
+		if pid, ok := argsMap["project_id"].(string); ok && pid != "" {
+			args = append(args, "--project-id", pid)
+		}
+		if aid, ok := argsMap["area_id"].(string); ok && aid != "" {
+			args = append(args, "--area-id", aid)
+		}
+		if assign, ok := argsMap["assigned_to"].(string); ok && assign != "" {
+			args = append(args, "--assigned-to", assign)
+		}
+		return executeCLI(args...)
 	})
 
 	updateTool := mcp.NewTool("gtd_task_update",
@@ -114,6 +127,10 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithString("id", mcp.Required(), mcp.Description("The task ID")),
 		mcp.WithString("text", mcp.Description("Optional new NLP string to apply")),
 		mcp.WithString("status", mcp.Description("Optional new status to set")),
+		mcp.WithString("project_id", mcp.Description("Optional project ID to associate")),
+		mcp.WithString("area_id", mcp.Description("Optional area ID to associate")),
+		mcp.WithString("assigned_to", mcp.Description("Optional person name/ID to assign to")),
+		mcp.WithString("start_offset", mcp.Description("Optional start offset JSON")),
 	)
 	s.AddTool(updateTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		argsMap, ok := request.Params.Arguments.(map[string]interface{})
@@ -127,6 +144,18 @@ func registerTools(s *server.MCPServer) {
 		}
 		if status, ok := argsMap["status"].(string); ok && status != "" {
 			args = append(args, "--status", status)
+		}
+		if pid, ok := argsMap["project_id"].(string); ok && pid != "" {
+			args = append(args, "--project-id", pid)
+		}
+		if aid, ok := argsMap["area_id"].(string); ok && aid != "" {
+			args = append(args, "--area-id", aid)
+		}
+		if assign, ok := argsMap["assigned_to"].(string); ok && assign != "" {
+			args = append(args, "--assigned-to", assign)
+		}
+		if off, ok := argsMap["start_offset"].(string); ok && off != "" {
+			args = append(args, "--start-offset", off)
 		}
 		return executeCLI(args...)
 	})
@@ -161,9 +190,52 @@ func registerTools(s *server.MCPServer) {
 
 	agendaTool := mcp.NewTool("gtd_get_agenda",
 		mcp.WithDescription("Get the user's agenda (due today, overdue). "+coachInstruction),
+		mcp.WithString("area_id", mcp.Description("Optional filter by Area ID")),
+		mcp.WithString("project_id", mcp.Description("Optional filter by Project ID")),
+		mcp.WithString("context", mcp.Description("Optional filter by Context")),
+		mcp.WithString("assigned_to", mcp.Description("Optional filter by Assigned To")),
 	)
 	s.AddTool(agendaTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return executeCLI("agenda")
+		argsMap, _ := request.Params.Arguments.(map[string]interface{})
+		args := []string{"agenda"}
+		if v, ok := argsMap["area_id"].(string); ok && v != "" {
+			args = append(args, "--area-id", v)
+		}
+		if v, ok := argsMap["project_id"].(string); ok && v != "" {
+			args = append(args, "--project-id", v)
+		}
+		if v, ok := argsMap["context"].(string); ok && v != "" {
+			args = append(args, "--context", v)
+		}
+		if v, ok := argsMap["assigned_to"].(string); ok && v != "" {
+			args = append(args, "--assigned-to", v)
+		}
+		return executeCLI(args...)
+	})
+
+	nextTool := mcp.NewTool("gtd_get_next",
+		mcp.WithDescription("Get the list of next actions. "+coachInstruction),
+		mcp.WithString("area_id", mcp.Description("Optional filter by Area ID")),
+		mcp.WithString("project_id", mcp.Description("Optional filter by Project ID")),
+		mcp.WithString("context", mcp.Description("Optional filter by Context")),
+		mcp.WithString("assigned_to", mcp.Description("Optional filter by Assigned To")),
+	)
+	s.AddTool(nextTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		argsMap, _ := request.Params.Arguments.(map[string]interface{})
+		args := []string{"next"}
+		if v, ok := argsMap["area_id"].(string); ok && v != "" {
+			args = append(args, "--area-id", v)
+		}
+		if v, ok := argsMap["project_id"].(string); ok && v != "" {
+			args = append(args, "--project-id", v)
+		}
+		if v, ok := argsMap["context"].(string); ok && v != "" {
+			args = append(args, "--context", v)
+		}
+		if v, ok := argsMap["assigned_to"].(string); ok && v != "" {
+			args = append(args, "--assigned-to", v)
+		}
+		return executeCLI(args...)
 	})
 
 	stalledTool := mcp.NewTool("gtd_get_stalled",
@@ -179,6 +251,8 @@ func registerTools(s *server.MCPServer) {
 	s.AddTool(inboxTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return executeCLI("inbox")
 	})
+
+	registerExtraTools(s)
 }
 
 func executeCLI(args ...string) (*mcp.CallToolResult, error) {

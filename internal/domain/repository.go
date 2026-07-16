@@ -28,16 +28,4 @@ type PersonRepository interface {
 	List() ([]*Person, error)
 }
 
-type SectionRepository interface {
-	Save(section *Section) error
-	Get(id string) (*Section, error)
-	Delete(id string) error
-	List() ([]*Section, error)
-}
 
-type SavedFilterRepository interface {
-	Save(filter *SavedFilter) error
-	Get(id string) (*SavedFilter, error)
-	Delete(id string) error
-	List() ([]*SavedFilter, error)
-}

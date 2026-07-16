@@ -37,6 +37,37 @@ The project is initialized in the 'active' status. Returns the JSON project repr
 			Status: domain.ProjectStatusActive,
 		}
 
+		areaID, _ := cmd.Flags().GetString("area-id")
+		areaName, _ := cmd.Flags().GetString("area")
+
+		if areaName != "" && areaID == "" {
+			// Find or create area
+			now := time.Now()
+			areas, _ := appCtx.areaRepo.List()
+			var found *domain.Area
+			for _, a := range areas {
+				if a.Name == areaName && a.DeletedAt == nil {
+					found = a
+					break
+				}
+			}
+			if found == nil {
+				found = &domain.Area{
+					ID:        uuid.New().String(),
+					Name:      areaName,
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+				appCtx.areaRepo.Save(found)
+				appCtx.syncEngine.SyncArea(context.Background(), found)
+			}
+			areaID = found.ID
+		}
+
+		if areaID != "" {
+			project.AreaID = &areaID
+		}
+
 		if err := appCtx.projectRepo.Save(project); err != nil {
 			return fmt.Errorf("save project: %w", err)
 		}
@@ -75,6 +106,41 @@ The --status flag allows changing the status of the project (e.g. active, someda
 			project.UpdateStatus(domain.ProjectStatus(status), time.Now())
 		}
 
+		areaID, _ := cmd.Flags().GetString("area-id")
+		areaName, _ := cmd.Flags().GetString("area")
+
+		if areaName != "" && areaID == "" {
+			now := time.Now()
+			areas, _ := appCtx.areaRepo.List()
+			var found *domain.Area
+			for _, a := range areas {
+				if a.Name == areaName && a.DeletedAt == nil {
+					found = a
+					break
+				}
+			}
+			if found == nil {
+				found = &domain.Area{
+					ID:        uuid.New().String(),
+					Name:      areaName,
+					CreatedAt: now,
+					UpdatedAt: now,
+				}
+				appCtx.areaRepo.Save(found)
+				appCtx.syncEngine.SyncArea(context.Background(), found)
+			}
+			areaID = found.ID
+		}
+
+		if cmd.Flags().Changed("area-id") || areaID != "" {
+			if areaID == "" {
+				project.AreaID = nil
+			} else {
+				project.AreaID = &areaID
+			}
+			project.UpdatedAt = time.Now()
+		}
+
 		if err := appCtx.projectRepo.Save(project); err != nil {
 			return fmt.Errorf("save project: %w", err)
 		}
@@ -107,8 +173,13 @@ Soft-deleted projects are hidden from normal list views.`,
 			return fmt.Errorf("project not found: %w", err)
 		}
 
+		tasks, err := appCtx.taskRepo.List()
+		if err != nil {
+			return fmt.Errorf("list tasks: %w", err)
+		}
+
 		now := time.Now()
-		project.SoftDelete(now, nil, nil)
+		project.SoftDelete(now, tasks)
 
 		if err := appCtx.projectRepo.Save(project); err != nil {
 			return fmt.Errorf("save project: %w", err)
@@ -116,6 +187,51 @@ Soft-deleted projects are hidden from normal list views.`,
 
 		if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
 			return fmt.Errorf("sync project: %w", err)
+		}
+
+		printSuccess(project)
+		return nil
+	},
+}
+
+var projectRestoreCmd = &cobra.Command{
+	Use:   "restore <id>",
+	Short: "Restore a project",
+	Long: `Restores a soft-deleted project by ID, and cascades the restoration to child tasks.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		appCtx, err := getAppContext()
+		if err != nil {
+			return err
+		}
+		defer appCtx.cleanup()
+
+		project, err := appCtx.projectRepo.Get(id)
+		if err != nil {
+			return fmt.Errorf("project not found: %w", err)
+		}
+
+		tasks, err := appCtx.taskRepo.List()
+		if err != nil {
+			return fmt.Errorf("list tasks: %w", err)
+		}
+
+		now := time.Now()
+		project.Restore(now, tasks)
+
+		if err := appCtx.projectRepo.Save(project); err != nil {
+			return fmt.Errorf("save project: %w", err)
+		}
+		if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
+			return fmt.Errorf("sync project: %w", err)
+		}
+
+		for _, t := range tasks {
+			if t.ProjectID != nil && *t.ProjectID == project.ID {
+				appCtx.taskRepo.Save(t)
+				appCtx.syncEngine.SyncTask(context.Background(), t, now)
+			}
 		}
 
 		printSuccess(project)
@@ -154,11 +270,17 @@ Returns a JSON list of IDs. When --plain is specified, fetches and outputs a det
 }
 
 func init() {
+	projectAddCmd.Flags().String("area-id", "", "Area ID to associate with the project")
+	projectAddCmd.Flags().String("area", "", "Area Name to associate with the project (creates if doesn't exist)")
+
 	projectUpdateCmd.Flags().String("status", "", "Status of the project")
+	projectUpdateCmd.Flags().String("area-id", "", "Area ID to associate with the project")
+	projectUpdateCmd.Flags().String("area", "", "Area Name to associate with the project (creates if doesn't exist)")
 
 	projectCmd.AddCommand(projectAddCmd)
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
+	projectCmd.AddCommand(projectRestoreCmd)
 	projectCmd.AddCommand(projectListCmd)
 
 	rootCmd.AddCommand(projectCmd)

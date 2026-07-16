@@ -10,14 +10,12 @@ func TestCascadeDelete(t *testing.T) {
 	task1 := &Task{ID: "task1", ProjectID: &project.ID}
 	task2 := &Task{ID: "task2", ProjectID: &project.ID}
 	task3 := &Task{ID: "task3", ProjectID: &project.ID}
-	section := &Section{ID: "sec1", ProjectID: "project1"}
 
 	tasks := []*Task{task1, task2, task3}
-	sections := []*Section{section}
 
 	now := time.Now().Truncate(time.Second)
 
-	project.SoftDelete(now, tasks, sections)
+	project.SoftDelete(now, tasks)
 
 	if project.DeletedAt == nil || !project.DeletedAt.Equal(now) {
 		t.Errorf("expected project DeletedAt to be %v, got %v", now, project.DeletedAt)
@@ -27,12 +25,9 @@ func TestCascadeDelete(t *testing.T) {
 			t.Errorf("expected task DeletedAt to be %v for %s, got %v", now, tk.ID, tk.DeletedAt)
 		}
 	}
-	if section.DeletedAt == nil || !section.DeletedAt.Equal(now) {
-		t.Errorf("expected section DeletedAt to be %v, got %v", now, section.DeletedAt)
-	}
 
 	// Test Restore
-	project.Restore(now, tasks, sections)
+	project.Restore(now, tasks)
 	if project.DeletedAt != nil {
 		t.Errorf("expected project DeletedAt to be nil")
 	}
@@ -40,9 +35,6 @@ func TestCascadeDelete(t *testing.T) {
 		if tk.DeletedAt != nil {
 			t.Errorf("expected task DeletedAt to be nil for %s", tk.ID)
 		}
-	}
-	if section.DeletedAt != nil {
-		t.Errorf("expected section DeletedAt to be nil")
 	}
 }
 

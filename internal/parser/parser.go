@@ -222,54 +222,10 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 					continue
 				} else {
 					// Not a `/` command. 
-					// Greedy matching for unquoted!
-					remainingStr := string(runes[i:])
-					var matched string
-					
-					if ch == '+' {
-						matched = greedyMatch(remainingStr, projNames)
-					} else if ch == '!' {
-						matched = greedyMatch(remainingStr, areaNames)
-					} else if ch == '%' {
-						matched = greedyMatch(remainingStr, peopleNames)
-					} else if ch == '#' {
-						matched = greedyMatch(remainingStr, tagNames)
-					} else if ch == '@' {
-						matched = greedyMatch(remainingStr, contextNames)
-					}
-					
-					if matched != "" {
-						tokenContent.WriteString(matched)
-						i += len([]rune(matched))
-					} else {
-						// fallback: read first word
-						for i < n && runes[i] != ' ' && runes[i] != '\t' && runes[i] != '\r' && runes[i] != '\n' {
-							tokenContent.WriteRune(runes[i])
-							i++
-						}
-						// if it is + or !, read subsequent words if they don't start with control prefix
-						if ch == '+' || ch == '!' {
-							for {
-								spStart := i
-								for i < n && (runes[i] == ' ' || runes[i] == '\t') {
-									i++
-								}
-								if i >= n || runes[i] == '\r' || runes[i] == '\n' {
-									i = spStart // backtrack
-									break
-								}
-								nextCh := runes[i]
-								if nextCh == '@' || nextCh == '#' || nextCh == '+' || nextCh == '!' || nextCh == '%' || nextCh == '/' {
-									i = spStart // backtrack
-									break
-								}
-								tokenContent.WriteRune(' ')
-								for i < n && runes[i] != ' ' && runes[i] != '\t' && runes[i] != '\r' && runes[i] != '\n' {
-									tokenContent.WriteRune(runes[i])
-									i++
-								}
-							}
-						}
+					// Only take the single word after the prefix.
+					for i < n && runes[i] != ' ' && runes[i] != '\t' && runes[i] != '\r' && runes[i] != '\n' {
+						tokenContent.WriteRune(runes[i])
+						i++
 					}
 				}
 			}
@@ -354,22 +310,7 @@ func Parse(input string, catalog *domain.EntityCatalog, opts ParseOptions, now t
 	return res, nil
 }
 
-func greedyMatch(s string, candidates []string) string {
-	sLower := strings.ToLower(s)
-	for _, c := range candidates {
-		cLower := strings.ToLower(c)
-		if strings.HasPrefix(sLower, cLower) {
-			// Ensure boundary match (next char is space or EOF)
-			if len(sLower) == len(cLower) || sLower[len(cLower)] == ' ' || sLower[len(cLower)] == '\t' {
-				// return exact casing from the input string for length of c
-				runes := []rune(s)
-				cRunes := []rune(c)
-				return string(runes[:len(cRunes)])
-			}
-		}
-	}
-	return ""
-}
+
 
 func unescape(s string) string {
 	s = strings.ReplaceAll(s, "\\@", "@")

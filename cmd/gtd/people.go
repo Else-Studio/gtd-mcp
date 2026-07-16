@@ -110,8 +110,48 @@ var peopleListCmd = &cobra.Command{
 	},
 }
 
+var peopleUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Update a person",
+	Long: `Updates a person's name by ID. Use --name to change their name.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		appCtx, err := getAppContext()
+		if err != nil {
+			return err
+		}
+		defer appCtx.cleanup()
+
+		person, err := appCtx.personRepo.Get(id)
+		if err != nil {
+			return fmt.Errorf("person not found: %w", err)
+		}
+
+		name, _ := cmd.Flags().GetString("name")
+		if name != "" {
+			person.Name = name
+			person.UpdatedAt = time.Now()
+		}
+
+		if err := appCtx.personRepo.Save(person); err != nil {
+			return fmt.Errorf("save person: %w", err)
+		}
+
+		if err := appCtx.syncEngine.SyncPerson(context.Background(), person); err != nil {
+			return fmt.Errorf("sync person: %w", err)
+		}
+
+		printSuccess(person)
+		return nil
+	},
+}
+
 func init() {
+	peopleUpdateCmd.Flags().String("name", "", "New name for the person")
+
 	peopleCmd.AddCommand(peopleAddCmd)
+	peopleCmd.AddCommand(peopleUpdateCmd)
 	peopleCmd.AddCommand(peopleDeleteCmd)
 	peopleCmd.AddCommand(peopleListCmd)
 

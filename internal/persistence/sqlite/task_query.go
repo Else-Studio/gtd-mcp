@@ -37,15 +37,49 @@ ORDER BY
 `
 }
 
+// TaskQueryFilter holds optional filters for tasks.
+type TaskQueryFilter struct {
+	AreaID     string
+	ProjectID  string
+	Context    string
+	AssignedTo string
+}
+
+func (f *TaskQueryFilter) Apply(query string, args []interface{}) (string, []interface{}) {
+	if f == nil {
+		return query, args
+	}
+	if f.AreaID != "" {
+		query += " AND areaId = ?"
+		args = append(args, f.AreaID)
+	}
+	if f.ProjectID != "" {
+		query += " AND projectId = ?"
+		args = append(args, f.ProjectID)
+	}
+	if f.Context != "" {
+		query += " AND EXISTS (SELECT 1 FROM json_each(contexts) WHERE value = ?)"
+		args = append(args, f.Context)
+	}
+	if f.AssignedTo != "" {
+		query += " AND assignedTo = ?"
+		args = append(args, f.AssignedTo)
+	}
+	return query, args
+}
+
 // ListActiveTasks queries tasks with the default sort order.
-func (q *TaskQuery) ListActiveTasks(ctx context.Context) ([]string, error) {
+func (q *TaskQuery) ListActiveTasks(ctx context.Context, filter *TaskQueryFilter) ([]string, error) {
 	query := `
 		SELECT id 
 		FROM tasks 
 		WHERE deletedAt IS NULL AND status NOT IN ('done', 'archived')
-	` + DefaultSortSQL()
+	`
+	args := []interface{}{}
+	query, args = filter.Apply(query, args)
+	query += DefaultSortSQL()
 
-	rows, err := q.db.QueryContext(ctx, query)
+	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query active tasks: %w", err)
 	}
@@ -63,14 +97,17 @@ func (q *TaskQuery) ListActiveTasks(ctx context.Context) ([]string, error) {
 }
 
 // ListTasksByStatus queries tasks matching a specific status.
-func (q *TaskQuery) ListTasksByStatus(ctx context.Context, status string) ([]string, error) {
+func (q *TaskQuery) ListTasksByStatus(ctx context.Context, status string, filter *TaskQueryFilter) ([]string, error) {
 	query := `
 		SELECT id 
 		FROM tasks 
 		WHERE deletedAt IS NULL AND status = ?
-	` + DefaultSortSQL()
+	`
+	args := []interface{}{status}
+	query, args = filter.Apply(query, args)
+	query += DefaultSortSQL()
 
-	rows, err := q.db.QueryContext(ctx, query, status)
+	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks by status: %w", err)
 	}
@@ -103,12 +140,12 @@ func (q *TaskQuery) CountProjectNextTasks(ctx context.Context, projectID string)
 
 // ListInboxTasks is a shortcut for listing all inbox tasks.
 func (q *TaskQuery) ListInboxTasks(ctx context.Context) ([]string, error) {
-	return q.ListTasksByStatus(ctx, string(domain.TaskStatusInbox))
+	return q.ListTasksByStatus(ctx, string(domain.TaskStatusInbox), nil)
 }
 
 // ListNextTasks is a shortcut for listing all next tasks.
 func (q *TaskQuery) ListNextTasks(ctx context.Context) ([]string, error) {
-	return q.ListTasksByStatus(ctx, string(domain.TaskStatusNext))
+	return q.ListTasksByStatus(ctx, string(domain.TaskStatusNext), nil)
 }
 
 // ListStalledProjects returns UUIDs of active projects with exactly 0 non-deleted 'next' tasks.
@@ -139,7 +176,7 @@ func (q *TaskQuery) ListStalledProjects(ctx context.Context) ([]string, error) {
 }
 
 // ListAgendaTasks returns tasks where dueDate <= now or startTime <= now
-func (q *TaskQuery) ListAgendaTasks(ctx context.Context, now time.Time) ([]string, error) {
+func (q *TaskQuery) ListAgendaTasks(ctx context.Context, now time.Time, filter *TaskQueryFilter) ([]string, error) {
 	nowStr := timeString(now)
 	query := `
 		SELECT id 
@@ -151,11 +188,16 @@ func (q *TaskQuery) ListAgendaTasks(ctx context.Context, now time.Time) ([]strin
 		      OR
 		      (startTime IS NOT NULL AND startTime <= ?)
 		  )
+	`
+	args := []interface{}{nowStr, nowStr}
+	query, args = filter.Apply(query, args)
+
+	query += `
 		ORDER BY 
 		  CASE WHEN dueDate IS NOT NULL THEN dueDate ELSE '9999-99-99' END ASC,
 		  CASE WHEN startTime IS NOT NULL THEN startTime ELSE '9999-99-99' END ASC
 	`
-	rows, err := q.db.QueryContext(ctx, query, nowStr, nowStr)
+	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

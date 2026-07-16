@@ -128,7 +128,6 @@ func (t *Task) DuplicateRecurringTask(newID string, completedAt time.Time, previ
 		Tags:                nextTags,
 		Contexts:            nextContexts,
 		ProjectID:           t.ProjectID,
-		SectionID:           t.SectionID,
 		AreaID:              t.AreaID,
 		TextDirection:       t.TextDirection,
 		CreatedAt:           completedAt,

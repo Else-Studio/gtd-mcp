@@ -66,8 +66,17 @@ var areaDeleteCmd = &cobra.Command{
 			return fmt.Errorf("area not found: %w", err)
 		}
 
+		projects, err := appCtx.projectRepo.List()
+		if err != nil {
+			return fmt.Errorf("list projects: %w", err)
+		}
+		tasks, err := appCtx.taskRepo.List()
+		if err != nil {
+			return fmt.Errorf("list tasks: %w", err)
+		}
+
 		now := time.Now()
-		area.SoftDelete(now)
+		area.SoftDelete(now, projects, tasks)
 
 		if err := appCtx.areaRepo.Save(area); err != nil {
 			return fmt.Errorf("save area: %w", err)
@@ -110,9 +119,105 @@ var areaListCmd = &cobra.Command{
 	},
 }
 
+var areaUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Update an area",
+	Long: `Updates an Area of Focus by ID. Use --name to change its name.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		appCtx, err := getAppContext()
+		if err != nil {
+			return err
+		}
+		defer appCtx.cleanup()
+
+		area, err := appCtx.areaRepo.Get(id)
+		if err != nil {
+			return fmt.Errorf("area not found: %w", err)
+		}
+
+		name, _ := cmd.Flags().GetString("name")
+		if name != "" {
+			area.Name = name
+			area.UpdatedAt = time.Now()
+		}
+
+		if err := appCtx.areaRepo.Save(area); err != nil {
+			return fmt.Errorf("save area: %w", err)
+		}
+
+		if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
+			return fmt.Errorf("sync area: %w", err)
+		}
+
+		printSuccess(area)
+		return nil
+	},
+}
+
+var areaRestoreCmd = &cobra.Command{
+	Use:   "restore <id>",
+	Short: "Restore an area",
+	Long: `Restores a soft-deleted Area of Focus by ID, and cascades the restoration to child projects and tasks.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		appCtx, err := getAppContext()
+		if err != nil {
+			return err
+		}
+		defer appCtx.cleanup()
+
+		area, err := appCtx.areaRepo.Get(id)
+		if err != nil {
+			return fmt.Errorf("area not found: %w", err)
+		}
+
+		projects, err := appCtx.projectRepo.List()
+		if err != nil {
+			return fmt.Errorf("list projects: %w", err)
+		}
+		tasks, err := appCtx.taskRepo.List()
+		if err != nil {
+			return fmt.Errorf("list tasks: %w", err)
+		}
+
+		now := time.Now()
+		area.Restore(now, projects, tasks)
+
+		if err := appCtx.areaRepo.Save(area); err != nil {
+			return fmt.Errorf("save area: %w", err)
+		}
+		if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
+			return fmt.Errorf("sync area: %w", err)
+		}
+
+		for _, p := range projects {
+			if p.AreaID != nil && *p.AreaID == area.ID {
+				appCtx.projectRepo.Save(p)
+				appCtx.syncEngine.SyncProject(context.Background(), p)
+			}
+		}
+		for _, t := range tasks {
+			if t.AreaID != nil && *t.AreaID == area.ID {
+				appCtx.taskRepo.Save(t)
+				appCtx.syncEngine.SyncTask(context.Background(), t, now)
+			}
+		}
+
+		printSuccess(area)
+		return nil
+	},
+}
+
 func init() {
+	areaUpdateCmd.Flags().String("name", "", "New name for the area")
+
 	areaCmd.AddCommand(areaAddCmd)
+	areaCmd.AddCommand(areaUpdateCmd)
 	areaCmd.AddCommand(areaDeleteCmd)
+	areaCmd.AddCommand(areaRestoreCmd)
 	areaCmd.AddCommand(areaListCmd)
 
 	rootCmd.AddCommand(areaCmd)

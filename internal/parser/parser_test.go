@@ -133,26 +133,7 @@ func TestParse(t *testing.T) {
 				}
 			},
 		},
-		{
-			name:          "Matching Multi-word Project (Greedy)",
-			input:         "Plan roadmap +Project Name /next",
-			expectedTitle: "Plan roadmap",
-			validate: func(t *testing.T, res *parser.ParseResult) {
-				if res.ProjectID == nil || *res.ProjectID != "proj-1" {
-					t.Errorf("expected project ID 'proj-1', got %v", res.ProjectID)
-				}
-			},
-		},
-		{
-			name:          "Matching Multi-word Tag (Greedy)",
-			input:         "Buy headset #home office supplies",
-			expectedTitle: "Buy headset supplies",
-			validate: func(t *testing.T, res *parser.ParseResult) {
-				if len(res.Tags) != 1 || res.Tags[0] != "#home office" {
-					t.Errorf("expected tags ['#home office'], got %v", res.Tags)
-				}
-			},
-		},
+
 		{
 			name:          "Quoted Multi-word Override",
 			input:         `task %"Jane Doe" more words`,
@@ -207,26 +188,34 @@ func TestParse(t *testing.T) {
 		{
 			name:          "New Project Parsed but Not Found",
 			input:         "Buy paint +New Project",
-			expectedTitle: "Buy paint",
+			expectedTitle: "Buy paint Project",
 			validate: func(t *testing.T, res *parser.ParseResult) {
 				if res.ProjectID != nil {
 					t.Errorf("expected ProjectID to be nil, got %v", res.ProjectID)
 				}
-				if res.ProjectTitle == nil || *res.ProjectTitle != "New Project" {
-					t.Errorf("expected ProjectTitle 'New Project', got %v", res.ProjectTitle)
+				if res.ProjectTitle == nil || *res.ProjectTitle != "New" {
+					var pt string
+					if res.ProjectTitle != nil {
+						pt = *res.ProjectTitle
+					}
+					t.Errorf("expected ProjectTitle 'New', got %v", pt)
 				}
 			},
 		},
 		{
 			name:          "New Area Parsed but Not Found",
 			input:         "Buy paint !New Area",
-			expectedTitle: "Buy paint",
+			expectedTitle: "Buy paint Area",
 			validate: func(t *testing.T, res *parser.ParseResult) {
 				if res.AreaID != nil {
 					t.Errorf("expected AreaID to be nil, got %v", res.AreaID)
 				}
-				if res.AreaName == nil || *res.AreaName != "New Area" {
-					t.Errorf("expected AreaName 'New Area', got %v", res.AreaName)
+				if res.AreaName == nil || *res.AreaName != "New" {
+					var an string
+					if res.AreaName != nil {
+						an = *res.AreaName
+					}
+					t.Errorf("expected AreaName 'New', got %v", an)
 				}
 			},
 		},

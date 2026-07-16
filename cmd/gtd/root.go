@@ -64,9 +64,7 @@ type appContext struct {
 	taskRepo    *fs.TaskRepository
 	projectRepo *fs.ProjectRepository
 	areaRepo    *fs.AreaRepository
-	sectionRepo *fs.SectionRepository
 	personRepo  *fs.PersonRepository
-	filterRepo  *fs.SavedFilterRepository
 	cleanup     func()
 }
 
@@ -85,11 +83,9 @@ func getAppContext() (*appContext, error) {
 	taskRepo := fs.NewTaskRepository(filepath.Join(wsDir, "tasks"))
 	projectRepo := fs.NewProjectRepository(filepath.Join(wsDir, "projects"))
 	areaRepo := fs.NewAreaRepository(filepath.Join(wsDir, "areas"))
-	sectionRepo := fs.NewSectionRepository(filepath.Join(wsDir, "sections"))
 	personRepo := fs.NewPersonRepository(filepath.Join(wsDir, "people"))
-	filterRepo := fs.NewSavedFilterRepository(filepath.Join(wsDir, "saved_filters"))
 
-	syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, sectionRepo, personRepo, filterRepo)
+	syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, personRepo)
 	taskQuery := sqlite.NewTaskQuery(db)
 
 	cleanup := func() {
@@ -103,9 +99,7 @@ func getAppContext() (*appContext, error) {
 		taskRepo:    taskRepo,
 		projectRepo: projectRepo,
 		areaRepo:    areaRepo,
-		sectionRepo: sectionRepo,
 		personRepo:  personRepo,
-		filterRepo:  filterRepo,
 		cleanup:     cleanup,
 	}, nil
 }

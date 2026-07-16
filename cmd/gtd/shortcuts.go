@@ -88,7 +88,8 @@ Default returns a JSON list of task IDs. Supports --plain for a task table.`,
 		}
 		defer appCtx.cleanup()
 
-		ids, err := appCtx.taskQuery.ListAgendaTasks(context.Background(), time.Now())
+		filter := buildTaskQueryFilter(cmd, appCtx)
+		ids, err := appCtx.taskQuery.ListAgendaTasks(context.Background(), time.Now(), filter)
 		if err != nil {
 			return fmt.Errorf("list agenda: %w", err)
 		}
@@ -99,6 +100,13 @@ Default returns a JSON list of task IDs. Supports --plain for a task table.`,
 }
 
 func init() {
+	agendaCmd.Flags().String("area-id", "", "Filter by Area ID")
+	agendaCmd.Flags().String("area", "", "Filter by Area Name")
+	agendaCmd.Flags().String("project-id", "", "Filter by Project ID")
+	agendaCmd.Flags().String("project", "", "Filter by Project Title")
+	agendaCmd.Flags().String("context", "", "Filter by Context")
+	agendaCmd.Flags().String("assigned-to", "", "Filter by Assigned To")
+
 	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(stalledCmd)

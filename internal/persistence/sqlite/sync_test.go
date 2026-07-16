@@ -22,7 +22,7 @@ func setupDB(t *testing.T) *sqlite.SyncEngine {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	engine := sqlite.NewSyncEngine(db, nil, nil, nil, nil, nil, nil)
+	engine := sqlite.NewSyncEngine(db, nil, nil, nil, nil)
 	return engine
 }
 
@@ -109,7 +109,7 @@ func TestSyncEngineScale(t *testing.T) {
 	}
 	defer db.Close()
 
-	engine := sqlite.NewSyncEngine(db, taskRepo, nil, nil, nil, nil, nil)
+	engine := sqlite.NewSyncEngine(db, taskRepo, nil, nil, nil)
 	if err := engine.Sync(context.Background(), now); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}

@@ -25,9 +25,7 @@ Also initializes an empty config.yml file and the sqlite database index.db.`,
 			"tasks",
 			"projects",
 			"areas",
-			"sections",
 			"people",
-			"saved_filters",
 		}
 
 		for _, d := range dirs {

@@ -1,7 +1,6 @@
 package main_test
 
 import (
-	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -83,7 +82,7 @@ func TestE2E_Tester_Bootstrapping(t *testing.T) {
 	}
 
 	// 2. Verify folder structures
-	expectedDirs := []string{"tasks", "projects", "areas", "sections", "people", "saved_filters"}
+	expectedDirs := []string{"tasks", "projects", "areas", "people"}
 	for _, dir := range expectedDirs {
 		p := filepath.Join(wsDir, dir)
 		if info, err := os.Stat(p); err != nil || !info.IsDir() {
@@ -1076,34 +1075,6 @@ func TestE2E_Tester_Exploration10_TaskPromotion(t *testing.T) {
 	}
 }
 
-// TestE2E_Tester_Exploration11_GreedyTokenParsing stress-tests greedy matching in quick-add NLP.
-func TestE2E_Tester_Exploration11_GreedyTokenParsing(t *testing.T) {
-	wsDir := t.TempDir()
-	runCmdJSON(t, wsDir, "init")
-
-	// 1. Create nested Projects
-	runCmdJSON(t, wsDir, "project", "add", "Design")
-	projDesignSystem := runCmdJSON(t, wsDir, "project", "add", "Design System")
-	projDesignSystemID := projDesignSystem["data"].(map[string]interface{})["id"].(string)
-
-	// 2. Create nested Areas
-	runCmdJSON(t, wsDir, "area", "add", "Home")
-	areaHomeRenovation := runCmdJSON(t, wsDir, "area", "add", "Home Renovation")
-	areaHomeRenovationID := areaHomeRenovation["data"].(map[string]interface{})["id"].(string)
-
-	runCmdJSON(t, wsDir, "index", "rebuild")
-
-	// 3. Add task with matching names. Longest match should win.
-	taskRes := runCmdJSON(t, wsDir, "task", "add", "Review components +Design System !Home Renovation /next")
-	taskData := taskRes["data"].(map[string]interface{})
-
-	if pID, _ := taskData["projectId"].(string); pID != projDesignSystemID {
-		t.Errorf("expected task to be greedy-matched to project 'Design System' (%s), got %v", projDesignSystemID, pID)
-	}
-	if aID, _ := taskData["areaId"].(string); aID != areaHomeRenovationID {
-		t.Errorf("expected task to be greedy-matched to area 'Home Renovation' (%s), got %v", areaHomeRenovationID, aID)
-	}
-}
 
 // TestE2E_Tester_Exploration12_QuotedOverrides stress-tests quoted overrides and escapes.
 func TestE2E_Tester_Exploration12_QuotedOverrides(t *testing.T) {
@@ -1188,59 +1159,61 @@ func TestE2E_Tester_Exploration14_ArchivedProjectTaskRestriction(t *testing.T) {
 	}
 }
 
-// TestE2E_Tester_Exploration15_FTS5SearchDatabaseConsistency stress-tests FTS5 trigger sync.
-func TestE2E_Tester_Exploration15_FTS5SearchDatabaseConsistency(t *testing.T) {
+
+
+// TestE2E_Tester_AdHocFilters verifies task list and agenda queries with context, project, area, and people filtering.
+func TestE2E_Tester_AdHocFilters(t *testing.T) {
 	wsDir := t.TempDir()
 	runCmdJSON(t, wsDir, "init")
 
-	// 1. Add Task
-	taskRes := runCmdJSON(t, wsDir, "task", "add", "Draft quarterly memo /next")
-	taskData := taskRes["data"].(map[string]interface{})
-	taskID := taskData["id"].(string)
+	// Add Project
+	projRes := runCmdJSON(t, wsDir, "project", "add", "Migration")
+	projID := projRes["data"].(map[string]interface{})["id"].(string)
 
-	// Rebuild index
+	// Add Area
+	areaRes := runCmdJSON(t, wsDir, "area", "add", "Engineering")
+	areaID := areaRes["data"].(map[string]interface{})["id"].(string)
+
+	// Add People
+	peopleRes := runCmdJSON(t, wsDir, "people", "add", "Bob")
+	_ = peopleRes["data"].(map[string]interface{})["id"].(string)
+
+	// Add tasks
+	t1 := runCmdJSON(t, wsDir, "task", "add", "Migrate DB +Migration @computer /next")
+	t2 := runCmdJSON(t, wsDir, "task", "add", "Update firewall !Engineering @server /next")
+	t3 := runCmdJSON(t, wsDir, "task", "add", "Ask Bob about specs %Bob +Migration /next")
+
+	t1ID := t1["data"].(map[string]interface{})["id"].(string)
+	t2ID := t2["data"].(map[string]interface{})["id"].(string)
+	t3ID := t3["data"].(map[string]interface{})["id"].(string)
+
 	runCmdJSON(t, wsDir, "index", "rebuild")
 
-	dbPath := filepath.Join(wsDir, "index.db")
-	db, err := sql.Open("sqlite3", dbPath)
-	if err != nil {
-		t.Fatalf("failed to open sqlite index.db: %v", err)
-	}
-	defer db.Close()
-
-	// 2. Assert FTS table contains task
-	var count int
-	err = db.QueryRow("SELECT COUNT(*) FROM tasks_fts WHERE title MATCH 'quarterly'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query tasks_fts: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("expected 1 FTS match for 'quarterly', got %d", count)
+	// 1. Filter by Project ID
+	listProj := runCmdJSON(t, wsDir, "task", "list", "--project-id", projID)
+	dataProj := toSlice(listProj["data"])
+	if len(dataProj) != 2 {
+		t.Errorf("expected 2 tasks for project filter, got %d", len(dataProj))
 	}
 
-	// 3. Update task title
-	runCmdJSON(t, wsDir, "task", "update", taskID, "Finalize quarterly memo")
-	runCmdJSON(t, wsDir, "index", "rebuild")
-
-	// Assert updated title in FTS
-	err = db.QueryRow("SELECT COUNT(*) FROM tasks_fts WHERE title MATCH 'Finalize'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query tasks_fts after update: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("expected 1 FTS match for 'Finalize' after update, got %d", count)
+	// 2. Filter by Context
+	listCtx := runCmdJSON(t, wsDir, "task", "list", "--context", "@computer")
+	dataCtx := toSlice(listCtx["data"])
+	if len(dataCtx) != 1 || dataCtx[0].(map[string]interface{})["id"].(string) != t1ID {
+		t.Errorf("expected 1 task for context @computer, got %d", len(dataCtx))
 	}
 
-	// 4. Delete task
-	runCmdJSON(t, wsDir, "task", "delete", taskID)
-	runCmdJSON(t, wsDir, "index", "rebuild")
-
-	// Assert no longer in FTS (soft delete / trigger sync)
-	err = db.QueryRow("SELECT COUNT(*) FROM tasks_fts WHERE title MATCH 'quarterly'").Scan(&count)
-	if err != nil {
-		t.Fatalf("failed to query tasks_fts after delete: %v", err)
+	// 3. Filter by Area ID
+	listArea := runCmdJSON(t, wsDir, "task", "list", "--area-id", areaID)
+	dataArea := toSlice(listArea["data"])
+	if len(dataArea) != 1 || dataArea[0].(map[string]interface{})["id"].(string) != t2ID {
+		t.Errorf("expected 1 task for area Engineering, got %d", len(dataArea))
 	}
-	if count != 0 {
-		t.Errorf("expected 0 FTS matches for 'quarterly' after delete, got %d", count)
+
+	// 4. Filter by AssignedTo
+	listPeople := runCmdJSON(t, wsDir, "task", "list", "--assigned-to", "Bob")
+	dataPeople := toSlice(listPeople["data"])
+	if len(dataPeople) != 1 || dataPeople[0].(map[string]interface{})["id"].(string) != t3ID {
+		t.Errorf("expected 1 task for assignedTo Bob, got %d", len(dataPeople))
 	}
 }

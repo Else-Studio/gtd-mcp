@@ -29,21 +29,6 @@ func TestTaskExclusivity(t *testing.T) {
 	}
 }
 
-func TestSetProjectClearsSection(t *testing.T) {
-	sectionID := "sec1"
-	task := &Task{
-		ID:        "task1",
-		Title:     "Some task",
-		SectionID: &sectionID,
-	}
-
-	project := &Project{ID: "proj2"}
-	task.SetProject(project)
-
-	if task.SectionID != nil {
-		t.Errorf("expected SectionID to be nil after SetProject, got %v", *task.SectionID)
-	}
-}
 
 func TestTaskCompletion(t *testing.T) {
 	task := &Task{ID: "task1", Status: TaskStatusNext}

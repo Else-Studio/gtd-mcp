@@ -14,9 +14,7 @@ type SyncEngine struct {
 	taskRepo    domain.TaskRepository
 	projectRepo domain.ProjectRepository
 	areaRepo    domain.AreaRepository
-	sectionRepo domain.SectionRepository
 	personRepo  domain.PersonRepository
-	filterRepo  domain.SavedFilterRepository
 }
 
 func NewSyncEngine(
@@ -24,18 +22,14 @@ func NewSyncEngine(
 	taskRepo domain.TaskRepository,
 	projectRepo domain.ProjectRepository,
 	areaRepo domain.AreaRepository,
-	sectionRepo domain.SectionRepository,
 	personRepo domain.PersonRepository,
-	filterRepo domain.SavedFilterRepository,
 ) *SyncEngine {
 	return &SyncEngine{
 		db:          db,
 		taskRepo:    taskRepo,
 		projectRepo: projectRepo,
 		areaRepo:    areaRepo,
-		sectionRepo: sectionRepo,
 		personRepo:  personRepo,
-		filterRepo:  filterRepo,
 	}
 }
 
@@ -47,7 +41,7 @@ func (s *SyncEngine) Sync(ctx context.Context, now time.Time) error {
 	defer tx.Rollback()
 
 	// Clear existing cache since it's a full sync
-	tables := []string{"tasks", "sections", "projects", "areas", "people", "saved_filters"}
+	tables := []string{"tasks", "projects", "areas", "people"}
 	for _, t := range tables {
 		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 			return err
@@ -78,17 +72,7 @@ func (s *SyncEngine) Sync(ctx context.Context, now time.Time) error {
 		}
 	}
 
-	if s.sectionRepo != nil {
-		sections, err := s.sectionRepo.List()
-		if err != nil {
-			return err
-		}
-		for _, sec := range sections {
-			if err := insertSection(tx, sec); err != nil {
-				return err
-			}
-		}
-	}
+
 
 	if s.personRepo != nil {
 		people, err := s.personRepo.List()
@@ -102,17 +86,7 @@ func (s *SyncEngine) Sync(ctx context.Context, now time.Time) error {
 		}
 	}
 
-	if s.filterRepo != nil {
-		filters, err := s.filterRepo.List()
-		if err != nil {
-			return err
-		}
-		for _, f := range filters {
-			if err := insertSavedFilter(tx, f); err != nil {
-				return err
-			}
-		}
-	}
+
 
 	if s.taskRepo != nil {
 		tasks, err := s.taskRepo.List()
@@ -179,20 +153,7 @@ func (s *SyncEngine) SyncArea(ctx context.Context, a *domain.Area) error {
 	return tx.Commit()
 }
 
-func (s *SyncEngine) SyncSection(ctx context.Context, sec *domain.Section) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM sections WHERE id = ?", sec.ID); err != nil {
-		return err
-	}
-	if err := insertSection(tx, sec); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
+
 
 func (s *SyncEngine) SyncPerson(ctx context.Context, p *domain.Person) error {
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -209,20 +170,7 @@ func (s *SyncEngine) SyncPerson(ctx context.Context, p *domain.Person) error {
 	return tx.Commit()
 }
 
-func (s *SyncEngine) SyncSavedFilter(ctx context.Context, f *domain.SavedFilter) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM saved_filters WHERE id = ?", f.ID); err != nil {
-		return err
-	}
-	if err := insertSavedFilter(tx, f); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
+
 
 func NormalizeTaskForLoad(t *domain.Task, now time.Time) {
 	if t.CreatedAt.IsZero() {
@@ -277,35 +225,23 @@ func insertTask(tx *sql.Tx, t *domain.Task) error {
 	query := `INSERT INTO tasks (
 		id, title, status, priority, energyLevel, assignedTo, startTime, relativeStartOffset,
 		dueDate, recurrence, tags, contexts, description, textDirection, attachments, location,
-		projectId, sectionId, areaId, orderNum, timeEstimate, timeSpentMinutes, reviewAt, completedAt,
+		projectId, areaId, orderNum, timeEstimate, timeSpentMinutes, reviewAt, completedAt,
 		createdAt, updatedAt, deletedAt
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	_, err := tx.Exec(query,
 		t.ID, t.Title, string(t.Status), t.Priority, t.EnergyLevel, t.AssignedTo,
 		timePtrString(t.StartTime), jsonString(t.RelativeStartOffset),
 		timePtrString(t.DueDate), jsonString(t.Recurrence),
 		jsonString(t.Tags), jsonString(t.Contexts), t.Description, t.TextDirection,
-		jsonString(t.Attachments), t.Location, t.ProjectID, t.SectionID, t.AreaID,
+		jsonString(t.Attachments), t.Location, t.ProjectID, t.AreaID,
 		t.OrderNum, t.TimeEstimate, t.TimeSpentMinutes, timePtrString(t.ReviewAt),
 		timePtrString(t.CompletedAt), timeString(t.CreatedAt), timeString(t.UpdatedAt), timePtrString(t.DeletedAt),
 	)
 	return err
 }
 
-func insertSection(tx *sql.Tx, s *domain.Section) error {
-	query := `INSERT INTO sections (id, projectId, title, description, orderNum, isCollapsed, createdAt, updatedAt, deletedAt)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	collapsed := 0
-	if s.IsCollapsed {
-		collapsed = 1
-	}
-	_, err := tx.Exec(query,
-		s.ID, s.ProjectID, s.Title, s.Description, s.OrderNum, collapsed,
-		timeString(s.CreatedAt), timeString(s.UpdatedAt), timePtrString(s.DeletedAt),
-	)
-	return err
-}
+
 
 func insertPerson(tx *sql.Tx, p *domain.Person) error {
 	query := `INSERT INTO people (id, name, note, referenceLink, createdAt, updatedAt, deletedAt)
@@ -317,15 +253,7 @@ func insertPerson(tx *sql.Tx, p *domain.Person) error {
 	return err
 }
 
-func insertSavedFilter(tx *sql.Tx, f *domain.SavedFilter) error {
-	query := `INSERT INTO saved_filters (id, name, icon, view, criteria, sortBy, sortOrder, groupBy, createdAt, updatedAt, deletedAt)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := tx.Exec(query,
-		f.ID, f.Name, f.Icon, f.View, f.Criteria, f.SortBy, f.SortOrder, f.GroupBy,
-		timeString(f.CreatedAt), timeString(f.UpdatedAt), timePtrString(f.DeletedAt),
-	)
-	return err
-}
+
 
 func timeString(t time.Time) string {
 	if t.IsZero() {

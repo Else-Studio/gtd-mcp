@@ -23,7 +23,6 @@ type Task struct {
 	Attachments         []Attachment       `json:"attachments,omitempty"`
 	Location            string             `json:"location,omitempty"`
 	ProjectID           *string            `json:"projectId,omitempty"`
-	SectionID           *string            `json:"sectionId,omitempty"`
 	AreaID              *string            `json:"areaId,omitempty"`
 	OrderNum            int                `json:"orderNum"`
 	TimeEstimate        string             `json:"timeEstimate,omitempty"`
@@ -68,7 +67,6 @@ func (t *Task) SetProject(project *Project) {
 	if project != nil {
 		t.ProjectID = &project.ID
 		t.AreaID = nil
-		t.SectionID = nil
 	}
 }
 
@@ -76,19 +74,10 @@ func (t *Task) SetArea(area *Area) {
 	if area != nil {
 		t.AreaID = &area.ID
 		t.ProjectID = nil
-		t.SectionID = nil
 	}
 }
 
-func (t *Task) SetSection(section *Section) {
-	if section != nil {
-		if t.ProjectID != nil && *t.ProjectID == section.ProjectID {
-			t.SectionID = &section.ID
-		}
-	} else {
-		t.SectionID = nil
-	}
-}
+
 
 func (t *Task) Validate() error {
 	if t.ID == "" {

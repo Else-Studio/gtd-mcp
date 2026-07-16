@@ -23,15 +23,9 @@ type Project struct {
 	DeletedAt    *time.Time    `json:"deletedAt,omitempty"`
 }
 
-func (p *Project) SoftDelete(now time.Time, tasks []*Task, sections []*Section) {
+func (p *Project) SoftDelete(now time.Time, tasks []*Task) {
 	p.DeletedAt = &now
 	p.UpdatedAt = now
-
-	for _, s := range sections {
-		if s.ProjectID == p.ID {
-			s.SoftDelete(now)
-		}
-	}
 
 	for _, t := range tasks {
 		if t.ProjectID != nil && *t.ProjectID == p.ID {
@@ -40,15 +34,9 @@ func (p *Project) SoftDelete(now time.Time, tasks []*Task, sections []*Section) 
 	}
 }
 
-func (p *Project) Restore(now time.Time, tasks []*Task, sections []*Section) {
+func (p *Project) Restore(now time.Time, tasks []*Task) {
 	p.DeletedAt = nil
 	p.UpdatedAt = now
-
-	for _, s := range sections {
-		if s.ProjectID == p.ID {
-			s.Restore(now)
-		}
-	}
 
 	for _, t := range tasks {
 		if t.ProjectID != nil && *t.ProjectID == p.ID {

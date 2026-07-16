@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 	"gtd/internal/domain"
 	"gtd/internal/parser"
+	"gtd/internal/persistence/sqlite"
+	"encoding/json"
 )
 
 
@@ -133,6 +135,20 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 		}
 		if parsed.EnergyLevel != nil {
 			task.EnergyLevel = *parsed.EnergyLevel
+		}
+
+		if projID, _ := cmd.Flags().GetString("project-id"); projID != "" {
+			task.ProjectID = &projID
+			task.AreaID = nil
+		}
+		if areaID, _ := cmd.Flags().GetString("area-id"); areaID != "" {
+			task.AreaID = &areaID
+			if task.ProjectID != nil {
+				task.AreaID = nil
+			}
+		}
+		if assignedTo, _ := cmd.Flags().GetString("assigned-to"); assignedTo != "" {
+			task.AssignedTo = assignedTo
 		}
 
 		if err := appCtx.taskRepo.Save(task); err != nil {
@@ -270,6 +286,42 @@ Example:
 				}
 			} else {
 				return fmt.Errorf("parse task: %w", err)
+			}
+		}
+
+		if cmd.Flags().Changed("project-id") {
+			if projID, _ := cmd.Flags().GetString("project-id"); projID != "" {
+				task.ProjectID = &projID
+				task.AreaID = nil
+			} else {
+				task.ProjectID = nil
+			}
+			task.UpdatedAt = time.Now()
+		}
+		if cmd.Flags().Changed("area-id") {
+			if areaID, _ := cmd.Flags().GetString("area-id"); areaID != "" {
+				task.AreaID = &areaID
+				if task.ProjectID != nil {
+					task.AreaID = nil
+				}
+			} else {
+				task.AreaID = nil
+			}
+			task.UpdatedAt = time.Now()
+		}
+		if cmd.Flags().Changed("assigned-to") {
+			task.AssignedTo, _ = cmd.Flags().GetString("assigned-to")
+			task.UpdatedAt = time.Now()
+		}
+		if cmd.Flags().Changed("start-offset") {
+			offsetStr, _ := cmd.Flags().GetString("start-offset")
+			if offsetStr == "" {
+				task.UpdateRelativeStartOffset(nil)
+			} else {
+				var offset domain.RelativeOffset
+				if err := json.Unmarshal([]byte(offsetStr), &offset); err == nil {
+					task.UpdateRelativeStartOffset(&offset)
+				}
 			}
 		}
 
@@ -416,10 +468,12 @@ By default, returns a JSON list of task IDs. When --plain is specified, returns 
 		ids := []string{}
 		ctx := context.Background()
 
+		filter := buildTaskQueryFilter(cmd, appCtx)
+
 		if len(args) == 0 {
-			ids, err = appCtx.taskQuery.ListActiveTasks(ctx)
+			ids, err = appCtx.taskQuery.ListActiveTasks(ctx, filter)
 		} else {
-			ids, err = appCtx.taskQuery.ListTasksByStatus(ctx, args[0])
+			ids, err = appCtx.taskQuery.ListTasksByStatus(ctx, args[0], filter)
 		}
 
 		if err != nil {
@@ -431,8 +485,60 @@ By default, returns a JSON list of task IDs. When --plain is specified, returns 
 	},
 }
 
+func buildTaskQueryFilter(cmd *cobra.Command, appCtx *appContext) *sqlite.TaskQueryFilter {
+	filter := &sqlite.TaskQueryFilter{}
+
+	if val, _ := cmd.Flags().GetString("area-id"); val != "" {
+		filter.AreaID = val
+	} else if name, _ := cmd.Flags().GetString("area"); name != "" {
+		areas, _ := appCtx.areaRepo.List()
+		for _, a := range areas {
+			if a.Name == name {
+				filter.AreaID = a.ID
+				break
+			}
+		}
+	}
+
+	if val, _ := cmd.Flags().GetString("project-id"); val != "" {
+		filter.ProjectID = val
+	} else if title, _ := cmd.Flags().GetString("project"); title != "" {
+		projects, _ := appCtx.projectRepo.List()
+		for _, p := range projects {
+			if p.Title == title {
+				filter.ProjectID = p.ID
+				break
+			}
+		}
+	}
+
+	if val, _ := cmd.Flags().GetString("context"); val != "" {
+		filter.Context = val
+	}
+	if val, _ := cmd.Flags().GetString("assigned-to"); val != "" {
+		filter.AssignedTo = val
+	}
+
+	return filter
+}
+
 func init() {
+	taskAddCmd.Flags().String("project-id", "", "Project ID")
+	taskAddCmd.Flags().String("area-id", "", "Area ID")
+	taskAddCmd.Flags().String("assigned-to", "", "Assigned To")
+
 	taskUpdateCmd.Flags().String("status", "", "Status of the task")
+	taskUpdateCmd.Flags().String("project-id", "", "Project ID")
+	taskUpdateCmd.Flags().String("area-id", "", "Area ID")
+	taskUpdateCmd.Flags().String("assigned-to", "", "Assigned To")
+	taskUpdateCmd.Flags().String("start-offset", "", "Start Offset JSON")
+
+	taskListCmd.Flags().String("area-id", "", "Filter by Area ID")
+	taskListCmd.Flags().String("area", "", "Filter by Area Name")
+	taskListCmd.Flags().String("project-id", "", "Filter by Project ID")
+	taskListCmd.Flags().String("project", "", "Filter by Project Title")
+	taskListCmd.Flags().String("context", "", "Filter by Context")
+	taskListCmd.Flags().String("assigned-to", "", "Filter by Assigned To")
 
 	taskCmd.AddCommand(taskAddCmd)
 	taskCmd.AddCommand(taskUpdateCmd)

@@ -57,9 +57,7 @@ func TestCLI_Init(t *testing.T) {
 		"tasks",
 		"projects",
 		"areas",
-		"sections",
 		"people",
-		"saved_filters",
 	}
 	for _, d := range expectedDirs {
 		if _, err := os.Stat(filepath.Join(workspaceDir, d)); os.IsNotExist(err) {

@@ -26,12 +26,36 @@ func (a *Area) Validate() error {
 	return nil
 }
 
-func (a *Area) SoftDelete(now time.Time) {
+func (a *Area) SoftDelete(now time.Time, projects []*Project, tasks []*Task) {
 	a.DeletedAt = &now
 	a.UpdatedAt = now
+
+	for _, p := range projects {
+		if p.AreaID != nil && *p.AreaID == a.ID {
+			p.SoftDelete(now, tasks)
+		}
+	}
+
+	for _, t := range tasks {
+		if t.AreaID != nil && *t.AreaID == a.ID {
+			t.SoftDelete(now)
+		}
+	}
 }
 
-func (a *Area) Restore(now time.Time) {
+func (a *Area) Restore(now time.Time, projects []*Project, tasks []*Task) {
 	a.DeletedAt = nil
 	a.UpdatedAt = now
+
+	for _, p := range projects {
+		if p.AreaID != nil && *p.AreaID == a.ID {
+			p.Restore(now, tasks)
+		}
+	}
+
+	for _, t := range tasks {
+		if t.AreaID != nil && *t.AreaID == a.ID {
+			t.Restore(now)
+		}
+	}
 }

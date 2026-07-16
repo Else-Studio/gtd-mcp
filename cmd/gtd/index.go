@@ -38,11 +38,9 @@ Run this command at the start of a session or during a Weekly Review to ensure d
 		taskRepo := fs.NewTaskRepository(filepath.Join(gtdDir, "tasks"))
 		projectRepo := fs.NewProjectRepository(filepath.Join(gtdDir, "projects"))
 		areaRepo := fs.NewAreaRepository(filepath.Join(gtdDir, "areas"))
-		sectionRepo := fs.NewSectionRepository(filepath.Join(gtdDir, "sections"))
 		personRepo := fs.NewPersonRepository(filepath.Join(gtdDir, "people"))
-		filterRepo := fs.NewSavedFilterRepository(filepath.Join(gtdDir, "saved_filters"))
 
-		syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, sectionRepo, personRepo, filterRepo)
+		syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, personRepo)
 		
 		ctx := context.Background()
 		now := time.Now()
