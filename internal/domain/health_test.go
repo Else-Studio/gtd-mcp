@@ -25,57 +25,72 @@ func TestProjectHealth(t *testing.T) {
 	}
 }
 
+func TestGetNextActionCandidates_SortOrder(t *testing.T) {
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	pid := "p1"
+	tasks := []*Task{
+		{ID: "A", Title: "Alpha", Status: TaskStatusInbox, ProjectID: &pid, OrderNum: 2, CreatedAt: now},
+		{ID: "B", Title: "Bravo", Status: TaskStatusWaiting, ProjectID: &pid, OrderNum: 2, CreatedAt: now.Add(time.Second)},
+		{ID: "C", Title: "Charlie", Status: TaskStatusSomeday, ProjectID: &pid, OrderNum: 1, CreatedAt: now.Add(2 * time.Second)},
+		{ID: "D", Title: "Delta", Status: TaskStatusInbox, ProjectID: &pid, OrderNum: 2, CreatedAt: now.Add(time.Second)},
+		{ID: "next", Title: "Already next", Status: TaskStatusNext, ProjectID: &pid, OrderNum: 0, CreatedAt: now},
+	}
+	cands := GetNextActionCandidates(pid, tasks, "")
+	want := []string{"C", "A", "B", "D"}
+	if len(cands) != len(want) {
+		t.Fatalf("got %d candidates, want %v", len(cands), want)
+	}
+	for i := range want {
+		if cands[i].ID != want[i] {
+			t.Errorf("order[%d] = %s, want %s", i, cands[i].ID, want[i])
+		}
+	}
+}
+
 func TestAgenda(t *testing.T) {
+	// Stage 15 product rule for agenda:
+	// - date-only due: calendar day comparison (date(due) <= date(now)) → due today included all day
+	// - timed due: full timestamp (due <= now)
+	// - startTime: start <= now
+	// - exclude: done, archived, reference, soft-deleted
 	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 
-	// DueDate <= now OR StartTime <= now.
-	// Crucially: A DueDate with no time component must be treated as 23:59:59.999 for overdue comparison.
-
-	dueMidnight := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC) // Date only, meaning it should be due 23:59:59.999
+	dueToday := time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)
+	dueYesterday := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
 	dueTomorrow := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	timedFuture := time.Date(2026, 7, 15, 18, 0, 0, 0, time.UTC)
+	timedPast := time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC)
 	startPast := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
 	startFuture := time.Date(2026, 7, 15, 14, 0, 0, 0, time.UTC)
 
 	tasks := []*Task{
-		{ID: "t1", DueDate: &dueMidnight}, // Should NOT be in agenda if we check strictly <= now (12:00), BUT with 23:59:59 it is effectively 23:59:59 >= 12:00, wait, "where DueDate <= now". If due is 23:59, then DueDate (23:59) is NOT <= now (12:00). So it is not overdue, but it is part of the agenda today? Wait! "Agenda / What's Important Now: Return tasks where DueDate <= now OR StartTime <= now". Wait, if DueDate is 2026-07-15 23:59:59, and now is 2026-07-15 12:00, then DueDate <= now is FALSE. It is not overdue. But usually Agenda includes things due *today*. Let's see the logic I implemented: `!effectiveDue.After(now)`. If effective is 23:59:59, it is After now, so it is NOT included!
-		// But wait! If due is today, it's due today, shouldn't it be in the Agenda? Let's check the requirement carefully:
-		// "Return tasks where DueDate <= now OR StartTime <= now. Crucially: A DueDate with no time component (e.g. 2026-07-15) MUST be treated as 23:59:59.999 for overdue comparison."
-		// Ah! If they are treated as 23:59:59.999, they will only be "overdue" (<= now) AFTER midnight tomorrow! Wait, that means they are NOT in the agenda today!
-		// Let's re-read the rule: "Agenda / "What's Important Now": Return tasks where DueDate <= now OR StartTime <= now".
-		// I will test this exactly as written.
-		{ID: "t2", StartTime: &startPast}, // Should be in agenda (10:00 <= 12:00)
-		{ID: "t3", DueDate: &dueTomorrow}, // Not in agenda
-		{ID: "t4", StartTime: &startFuture}, // Not in agenda
+		{ID: "due-today", Status: TaskStatusNext, DueDate: &dueToday},
+		{ID: "due-yesterday", Status: TaskStatusNext, DueDate: &dueYesterday},
+		{ID: "due-tomorrow", Status: TaskStatusNext, DueDate: &dueTomorrow},
+		{ID: "timed-future", Status: TaskStatusNext, DueDate: &timedFuture},
+		{ID: "timed-past", Status: TaskStatusNext, DueDate: &timedPast},
+		{ID: "start-past", Status: TaskStatusNext, StartTime: &startPast},
+		{ID: "start-future", Status: TaskStatusNext, StartTime: &startFuture},
+		{ID: "ref", Status: TaskStatusReference, DueDate: &dueToday},
+		{ID: "done", Status: TaskStatusDone, DueDate: &dueToday},
 	}
 
 	agenda := GetAgenda(tasks, now)
-	
-	foundT2 := false
+	got := map[string]bool{}
 	for _, a := range agenda {
-		if a.ID == "t2" {
-			foundT2 = true
-		}
-		if a.ID == "t1" {
-			t.Errorf("expected t1 NOT to be in agenda because 23:59:59 is after 12:00")
-		}
-	}
-	
-	if !foundT2 {
-		t.Errorf("expected t2 to be in agenda")
+		got[a.ID] = true
 	}
 
-	// Move now past midnight
-	nowLate := time.Date(2026, 7, 16, 1, 0, 0, 0, time.UTC)
-	agendaLate := GetAgenda(tasks, nowLate)
-	
-	foundT1 := false
-	for _, a := range agendaLate {
-		if a.ID == "t1" {
-			foundT1 = true
+	mustInclude := []string{"due-today", "due-yesterday", "timed-past", "start-past"}
+	mustExclude := []string{"due-tomorrow", "timed-future", "start-future", "ref", "done"}
+	for _, id := range mustInclude {
+		if !got[id] {
+			t.Errorf("expected %s in agenda at noon on due day", id)
 		}
 	}
-
-	if !foundT1 {
-		t.Errorf("expected t1 to be in agenda late because 23:59:59 is before 01:00 next day")
+	for _, id := range mustExclude {
+		if got[id] {
+			t.Errorf("expected %s excluded from agenda", id)
+		}
 	}
 }

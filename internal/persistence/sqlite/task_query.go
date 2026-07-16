@@ -18,7 +18,9 @@ func NewTaskQuery(db *sql.DB) *TaskQuery {
 	return &TaskQuery{db: db}
 }
 
-// DefaultSortSQL returns the ORDER BY clause required for default task sorting.
+// DefaultSortSQL returns the ORDER BY clause required for default task sorting
+// (technical API §6.B): status rank, then dated tasks before undated (nulls last),
+// then dueDate ASC, then createdAt ASC.
 func DefaultSortSQL() string {
 	return `
 ORDER BY
@@ -32,8 +34,29 @@ ORDER BY
 		WHEN 'archived' THEN 7
 		ELSE 8
 	END ASC,
+	CASE WHEN dueDate IS NULL THEN 1 ELSE 0 END ASC,
 	dueDate ASC,
 	createdAt ASC
+`
+}
+
+// defaultSortSQLAliased is DefaultSortSQL with a table alias (e.g. "t") for joins.
+func defaultSortSQLAliased(alias string) string {
+	return `
+ORDER BY
+	CASE ` + alias + `.status
+		WHEN 'inbox' THEN 1
+		WHEN 'next' THEN 2
+		WHEN 'waiting' THEN 3
+		WHEN 'someday' THEN 4
+		WHEN 'reference' THEN 5
+		WHEN 'done' THEN 6
+		WHEN 'archived' THEN 7
+		ELSE 8
+	END ASC,
+	CASE WHEN ` + alias + `.dueDate IS NULL THEN 1 ELSE 0 END ASC,
+	` + alias + `.dueDate ASC,
+	` + alias + `.createdAt ASC
 `
 }
 
@@ -181,22 +204,7 @@ func (q *TaskQuery) listNextTasksFiltered(ctx context.Context, filter *TaskQuery
 			args = append(args, filter.AssignedTo)
 		}
 	}
-	// DefaultSortSQL references bare column names; qualify for the join query.
-	query += `
-ORDER BY
-	CASE t.status
-		WHEN 'inbox' THEN 1
-		WHEN 'next' THEN 2
-		WHEN 'waiting' THEN 3
-		WHEN 'someday' THEN 4
-		WHEN 'reference' THEN 5
-		WHEN 'done' THEN 6
-		WHEN 'archived' THEN 7
-		ELSE 8
-	END ASC,
-	t.dueDate ASC,
-	t.createdAt ASC
-`
+	query += defaultSortSQLAliased("t")
 
 	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -234,9 +242,9 @@ func (q *TaskQuery) ListInboxTasks(ctx context.Context) ([]string, error) {
 	return q.ListTasksByStatus(ctx, string(domain.TaskStatusInbox), nil)
 }
 
-// ListNextTasks is a shortcut for listing all next tasks.
-func (q *TaskQuery) ListNextTasks(ctx context.Context) ([]string, error) {
-	return q.ListTasksByStatus(ctx, string(domain.TaskStatusNext), nil)
+// ListNextTasks is a shortcut for listing all next tasks (optional filters).
+func (q *TaskQuery) ListNextTasks(ctx context.Context, filter *TaskQueryFilter) ([]string, error) {
+	return q.ListTasksByStatus(ctx, string(domain.TaskStatusNext), filter)
 }
 
 // ListStalledProjects returns UUIDs of active projects with exactly 0 non-deleted 'next' tasks.
@@ -266,21 +274,36 @@ func (q *TaskQuery) ListStalledProjects(ctx context.Context) ([]string, error) {
 	return ids, rows.Err()
 }
 
-// ListAgendaTasks returns tasks where dueDate <= now or startTime <= now
+// ListAgendaTasks returns "What's Important Now" IDs (aligned with domain.GetAgenda):
+//   - exclude done / archived / reference / soft-deleted
+//   - date-only due (time 00:00:00): calendar day due <= calendar day now
+//   - timed due: dueDate <= now
+//   - startTime <= now
 func (q *TaskQuery) ListAgendaTasks(ctx context.Context, now time.Time, filter *TaskQueryFilter) ([]string, error) {
 	nowStr := timeString(now)
+	// date(now) for calendar-day comparison of date-only dues.
+	nowDate := now.Format("2006-01-02")
 	query := `
 		SELECT id 
 		FROM tasks 
 		WHERE deletedAt IS NULL 
-		  AND status NOT IN ('done', 'archived')
+		  AND status NOT IN ('done', 'archived', 'reference')
 		  AND (
-		      (dueDate IS NOT NULL AND dueDate <= ?)
-		      OR
 		      (startTime IS NOT NULL AND startTime <= ?)
+		      OR
+		      (dueDate IS NOT NULL AND (
+		          (
+		              strftime('%H:%M:%S', dueDate) = '00:00:00'
+		              AND date(dueDate) <= date(?)
+		          )
+		          OR (
+		              strftime('%H:%M:%S', dueDate) != '00:00:00'
+		              AND dueDate <= ?
+		          )
+		      ))
 		  )
 	`
-	args := []interface{}{nowStr, nowStr}
+	args := []interface{}{nowStr, nowDate, nowStr}
 	query, args = filter.Apply(query, args)
 
 	query += `
@@ -307,14 +330,15 @@ func (q *TaskQuery) ListAgendaTasks(ctx context.Context, now time.Time, filter *
 
 // GetProjectCandidates fetches open tasks that could be promoted to next:
 // non-deleted, not done/archived/reference, and not already next.
+// Sort: orderNum ASC → createdAt ASC → title ASC (technical API §7.B).
 func (q *TaskQuery) GetProjectCandidates(ctx context.Context, projectID string) ([]domain.Task, error) {
 	query := `
-		SELECT id, title, createdAt 
+		SELECT id, title, orderNum, createdAt 
 		FROM tasks 
 		WHERE deletedAt IS NULL
 		  AND projectId = ?
 		  AND status NOT IN ('done', 'archived', 'reference', 'next')
-		ORDER BY createdAt ASC
+		ORDER BY orderNum ASC, createdAt ASC, title ASC
 	`
 	rows, err := q.db.QueryContext(ctx, query, projectID)
 	if err != nil {
@@ -325,14 +349,16 @@ func (q *TaskQuery) GetProjectCandidates(ctx context.Context, projectID string) 
 	candidates := []domain.Task{}
 	for rows.Next() {
 		var id, title, createdAtStr string
-		if err := rows.Scan(&id, &title, &createdAtStr); err != nil {
+		var orderNum int
+		if err := rows.Scan(&id, &title, &orderNum, &createdAtStr); err != nil {
 			return nil, err
 		}
-		
+
 		createdAt, _ := time.Parse(time.RFC3339Nano, createdAtStr)
 		candidates = append(candidates, domain.Task{
 			ID:        id,
 			Title:     title,
+			OrderNum:  orderNum,
 			CreatedAt: createdAt,
 		})
 	}

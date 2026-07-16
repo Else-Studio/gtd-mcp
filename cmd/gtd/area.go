@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -35,12 +34,8 @@ var areaAddCmd = &cobra.Command{
 			Name: name,
 		}
 
-		if err := appCtx.areaRepo.Save(area); err != nil {
-			return fmt.Errorf("save area: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
-			return fmt.Errorf("sync area: %w", err)
+		if err := appCtx.PersistArea(area); err != nil {
+			return fmt.Errorf("persist area: %w", err)
 		}
 
 		printSuccess(area)
@@ -78,12 +73,8 @@ var areaDeleteCmd = &cobra.Command{
 		now := time.Now()
 		area.SoftDelete(now, projects, tasks)
 
-		if err := appCtx.areaRepo.Save(area); err != nil {
-			return fmt.Errorf("save area: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
-			return fmt.Errorf("sync area: %w", err)
+		if err := appCtx.PersistArea(area); err != nil {
+			return fmt.Errorf("persist area: %w", err)
 		}
 
 		// Persist cascade soft-deletes on child projects and tasks.
@@ -91,11 +82,8 @@ var areaDeleteCmd = &cobra.Command{
 		for _, p := range projects {
 			if p.AreaID != nil && *p.AreaID == area.ID {
 				cascadedProjects[p.ID] = true
-				if err := appCtx.projectRepo.Save(p); err != nil {
-					return fmt.Errorf("save cascaded project: %w", err)
-				}
-				if err := appCtx.syncEngine.SyncProject(context.Background(), p); err != nil {
-					return fmt.Errorf("sync cascaded project: %w", err)
+				if err := appCtx.PersistProject(p); err != nil {
+					return fmt.Errorf("persist cascaded project: %w", err)
 				}
 			}
 		}
@@ -105,11 +93,8 @@ var areaDeleteCmd = &cobra.Command{
 			if !underArea && !underCascadedProject {
 				continue
 			}
-			if err := appCtx.taskRepo.Save(t); err != nil {
-				return fmt.Errorf("save cascaded task: %w", err)
-			}
-			if err := appCtx.syncEngine.SyncTask(context.Background(), t, now); err != nil {
-				return fmt.Errorf("sync cascaded task: %w", err)
+			if err := appCtx.PersistTask(t, now); err != nil {
+				return fmt.Errorf("persist cascaded task: %w", err)
 			}
 		}
 
@@ -170,12 +155,8 @@ var areaUpdateCmd = &cobra.Command{
 			area.UpdatedAt = time.Now()
 		}
 
-		if err := appCtx.areaRepo.Save(area); err != nil {
-			return fmt.Errorf("save area: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
-			return fmt.Errorf("sync area: %w", err)
+		if err := appCtx.PersistArea(area); err != nil {
+			return fmt.Errorf("persist area: %w", err)
 		}
 
 		printSuccess(area)
@@ -213,22 +194,16 @@ var areaRestoreCmd = &cobra.Command{
 		now := time.Now()
 		area.Restore(now, projects, tasks)
 
-		if err := appCtx.areaRepo.Save(area); err != nil {
-			return fmt.Errorf("save area: %w", err)
-		}
-		if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
-			return fmt.Errorf("sync area: %w", err)
+		if err := appCtx.PersistArea(area); err != nil {
+			return fmt.Errorf("persist area: %w", err)
 		}
 
 		cascadedProjects := map[string]bool{}
 		for _, p := range projects {
 			if p.AreaID != nil && *p.AreaID == area.ID {
 				cascadedProjects[p.ID] = true
-				if err := appCtx.projectRepo.Save(p); err != nil {
-					return fmt.Errorf("save cascaded project: %w", err)
-				}
-				if err := appCtx.syncEngine.SyncProject(context.Background(), p); err != nil {
-					return fmt.Errorf("sync cascaded project: %w", err)
+				if err := appCtx.PersistProject(p); err != nil {
+					return fmt.Errorf("persist cascaded project: %w", err)
 				}
 			}
 		}
@@ -238,11 +213,8 @@ var areaRestoreCmd = &cobra.Command{
 			if !underArea && !underCascadedProject {
 				continue
 			}
-			if err := appCtx.taskRepo.Save(t); err != nil {
-				return fmt.Errorf("save cascaded task: %w", err)
-			}
-			if err := appCtx.syncEngine.SyncTask(context.Background(), t, now); err != nil {
-				return fmt.Errorf("sync cascaded task: %w", err)
+			if err := appCtx.PersistTask(t, now); err != nil {
+				return fmt.Errorf("persist cascaded task: %w", err)
 			}
 		}
 

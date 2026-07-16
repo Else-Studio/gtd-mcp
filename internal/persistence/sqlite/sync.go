@@ -9,6 +9,12 @@ import (
 	"gtd/internal/domain"
 )
 
+// SyncEngine updates the rebuildable SQLite read index from domain entities.
+// Markdown files remain the source of truth; callers must Save files first
+// (via CLI Persist* helpers) then Sync. Full rebuild is Sync() after external
+// file edits (`gtd index rebuild`). Per-entity Sync* methods re-normalize tasks
+// for defense in depth; CLI writes already apply NormalizeTaskForLoad before
+// file Save (policy A) so file and index match after a successful write.
 type SyncEngine struct {
 	db          *sql.DB
 	taskRepo    domain.TaskRepository

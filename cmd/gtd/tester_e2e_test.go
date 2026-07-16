@@ -426,6 +426,82 @@ func TestE2E_Tester_RecurringTaskFollowUps(t *testing.T) {
 	}
 }
 
+// TestE2E_Tester_RecurringTaskSpawnsExactlyOnce locks R1: spawn only on transition
+// into done/archived, not on every subsequent update of an already-completed instance.
+func TestE2E_Tester_RecurringTaskSpawnsExactlyOnce(t *testing.T) {
+	wsDir := t.TempDir()
+	runCmdJSON(t, wsDir, "init")
+
+	taskRes := runCmdJSON(t, wsDir, "task", "add", "Weekly report /recur:weekly /due:2026-07-20 /next")
+	taskID := taskRes["data"].(map[string]interface{})["id"].(string)
+
+	runCmdJSON(t, wsDir, "task", "update", taskID, "--status", "done")
+
+	// Count active next tasks that carry recurrence (spawned occurrences), not by
+	// title — a title edit of the completed parent would rename a buggy re-spawn.
+	countRecurringNext := func() int {
+		listRes := runCmdJSON(t, wsDir, "task", "list", "next")
+		n := 0
+		for _, item := range toSlice(listRes["data"]) {
+			m := item.(map[string]interface{})
+			if m["status"] == "next" && m["recurrence"] != nil && m["id"] != taskID {
+				n++
+			}
+		}
+		return n
+	}
+
+	if got := countRecurringNext(); got != 1 {
+		t.Fatalf("after first complete: expected exactly 1 next occurrence, got %d", got)
+	}
+
+	// Title-only update of the completed recurring instance must not re-spawn.
+	runCmdJSON(t, wsDir, "task", "update", taskID, "Weekly report (edited)")
+	if got := countRecurringNext(); got != 1 {
+		t.Fatalf("after title edit of done task: expected still 1 next occurrence, got %d", got)
+	}
+
+	// Idempotent re-complete must not spawn another.
+	runCmdJSON(t, wsDir, "task", "update", taskID, "--status", "done")
+	if got := countRecurringNext(); got != 1 {
+		t.Fatalf("after re-complete: expected still 1 next occurrence, got %d", got)
+	}
+}
+
+// TestE2E_Agenda_DateOnlyDueTodayAndReferenceExcluded locks CLI agenda semantics (R2).
+func TestE2E_Agenda_DateOnlyDueTodayAndReferenceExcluded(t *testing.T) {
+	wsDir := t.TempDir()
+	runCmdJSON(t, wsDir, "init")
+
+	today := time.Now().Format("2006-01-02")
+	tomorrow := time.Now().Add(24 * time.Hour).Format("2006-01-02")
+
+	runCmdJSON(t, wsDir, "task", "add", "Due today /due:"+today+" /next")
+	runCmdJSON(t, wsDir, "task", "add", "Due tomorrow /due:"+tomorrow+" /next")
+	refRes := runCmdJSON(t, wsDir, "task", "add", "Ref note /due:"+today)
+	refID := refRes["data"].(map[string]interface{})["id"].(string)
+	runCmdJSON(t, wsDir, "task", "update", refID, "--status", "reference")
+
+	agendaRes := runCmdJSON(t, wsDir, "agenda")
+	titles := map[string]bool{}
+	for _, item := range toSlice(agendaRes["data"]) {
+		m := item.(map[string]interface{})
+		if title, ok := m["title"].(string); ok {
+			titles[title] = true
+		}
+	}
+
+	if !titles["Due today"] {
+		t.Error("expected 'Due today' present in agenda")
+	}
+	if titles["Due tomorrow"] {
+		t.Error("expected 'Due tomorrow' absent from agenda")
+	}
+	if titles["Ref note"] {
+		t.Error("expected 'Ref note' (reference) absent from agenda")
+	}
+}
+
 // TestE2E_Tester_Exploration1_AcmeOnboarding stress-tests the Acme onboarding workflow.
 func TestE2E_Tester_Exploration1_AcmeOnboarding(t *testing.T) {
 	wsDir := t.TempDir()

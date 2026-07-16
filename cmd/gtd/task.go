@@ -28,21 +28,23 @@ var taskAddCmd = &cobra.Command{
 	Use:   "add <text>",
 	Short: "Add a new task",
 	Long: `Add a new task using the quick-add NLP parser.
-The parser processes the text string to instantly extract metadata:
-  +ProjectName   Binds task to a project (case-insensitive, greedy match)
-  !AreaName      Binds task to an Area of Focus (only if no project is assigned)
-  @Context       Adds physical context tags (e.g. @computer, @phone)
-  #Tag           Adds general classification tags (e.g. #urgent)
-  %Person        Assigns a delegate for waiting tasks
+The parser processes the text string to instantly extract metadata.
+Unquoted entity tokens are a single word only; use quotes for multi-word names:
+  +Project       Binds task to a project (one word; use +"Kitchen Sink" for multi-word)
+  !Area          Binds task to an Area of Focus if no project is assigned (!"Work Home")
+  @Context       Physical context (@computer; @"deep work")
+  #Tag           Classification tags (#urgent; #"home office")
+  %Person        Delegate for waiting tasks (%Bob; %"Jane Doe")
   /due:<date>    Sets due date (e.g. today, tomorrow, monday, or YYYY-MM-DD)
   /start:<date>  Sets relative or absolute start date
   /next          Sets status directly to 'next' action
   /someday       Sets status directly to 'someday' action
   /waiting       Sets status directly to 'waiting' action
   /reference     Sets status directly to 'reference' note
+  /done          Sets status to done (sets completedAt)
 
 Example:
-  gtd task add "Email Bob about proposal %Bob @computer +Work Migration /due:tomorrow"
+  gtd task add "Email Bob about proposal %Bob @computer +\"Work Migration\" /due:tomorrow"
 
 Returns a JSON task object containing fields like id, title, status, contexts, tags, and warnings. In plain mode, prints a single-row task table.`,
 	Args:  cobra.ExactArgs(1),
@@ -65,15 +67,10 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 			return fmt.Errorf("parse task: %w", err)
 		}
 
-		status := domain.TaskStatusInbox
-		if parsed.Status != nil {
-			status = *parsed.Status
-		}
-
 		task := &domain.Task{
 			ID:          uuid.New().String(),
 			Title:       parsed.Title,
-			Status:      status,
+			Status:      domain.TaskStatusInbox,
 			Contexts:    parsed.Contexts,
 			Tags:        parsed.Tags,
 			ProjectID:   parsed.ProjectID,
@@ -85,7 +82,18 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
-		
+
+		// Apply NLP status via domain helpers so /done and /archived set completedAt
+		// (and /reference clears schedule fields) before the file write.
+		if parsed.Status != nil {
+			if *parsed.Status == domain.TaskStatusReference {
+				task.SetReference()
+				task.UpdateStatus(domain.TaskStatusReference, now)
+			} else {
+				task.UpdateStatus(*parsed.Status, now)
+			}
+		}
+
 		if parsed.AssignedTo != nil {
 			task.AssignedTo = *parsed.AssignedTo
 		}
@@ -113,11 +121,8 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 				CreatedAt: now,
 				UpdatedAt: now,
 			}
-			if err := appCtx.projectRepo.Save(project); err != nil {
-				return fmt.Errorf("save new project: %w", err)
-			}
-			if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-				return fmt.Errorf("sync new project: %w", err)
+			if err := appCtx.PersistProject(project); err != nil {
+				return fmt.Errorf("persist new project: %w", err)
 			}
 			task.ProjectID = &project.ID
 			task.AreaID = nil
@@ -128,11 +133,8 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 				CreatedAt: now,
 				UpdatedAt: now,
 			}
-			if err := appCtx.areaRepo.Save(area); err != nil {
-				return fmt.Errorf("save new area: %w", err)
-			}
-			if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
-				return fmt.Errorf("sync new area: %w", err)
+			if err := appCtx.PersistArea(area); err != nil {
+				return fmt.Errorf("persist new area: %w", err)
 			}
 			task.AreaID = &area.ID
 			task.ProjectID = nil
@@ -152,11 +154,24 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 			task.ProjectID = &projID
 			task.AreaID = nil
 		}
+		// Explicit area flag: set area and clear project (last container wins).
 		if areaID, _ := cmd.Flags().GetString("area-id"); areaID != "" {
 			task.AreaID = &areaID
-			if task.ProjectID != nil {
-				task.AreaID = nil
+			task.ProjectID = nil
+		} else if areaName, _ := cmd.Flags().GetString("area"); areaName != "" {
+			areas, _ := appCtx.areaRepo.List()
+			var foundID string
+			for _, a := range areas {
+				if a.Name == areaName && a.DeletedAt == nil {
+					foundID = a.ID
+					break
+				}
 			}
+			if foundID == "" {
+				return fmt.Errorf("%w: area %q not found", domain.ErrValidation, areaName)
+			}
+			task.AreaID = &foundID
+			task.ProjectID = nil
 		}
 		if assignedTo, _ := cmd.Flags().GetString("assigned-to"); assignedTo != "" {
 			task.AssignedTo = assignedTo
@@ -166,15 +181,11 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 			return err
 		}
 
-		if err := appCtx.taskRepo.Save(task); err != nil {
-			return fmt.Errorf("save task: %w", err)
+		if err := appCtx.PersistTask(task, now); err != nil {
+			return fmt.Errorf("persist task: %w", err)
 		}
 
-		if err := appCtx.syncEngine.SyncTask(context.Background(), task, time.Now()); err != nil {
-			return fmt.Errorf("sync task: %w", err)
-		}
-
-		printSuccess(task)
+		printSuccess(decorateTask(task, parsed.InvalidDateCommands))
 		return nil
 	},
 }
@@ -214,6 +225,7 @@ Example:
 		// Capture status before any mutation for recurrence side-effects.
 		previousStatus := task.Status
 		now := time.Now()
+		var invalidDateCommands []string
 
 		if text != "" {
 			catalog, err := appCtx.taskQuery.GetEntityCatalog(context.Background())
@@ -222,6 +234,9 @@ Example:
 			}
 			parsed, err := parser.Parse(text, catalog, parser.ParseOptions{}, now)
 			if err == nil || err.Error() == "empty-title" {
+				if parsed != nil {
+					invalidDateCommands = parsed.InvalidDateCommands
+				}
 				if err == nil && parsed.Title != "" {
 					task.Title = parsed.Title
 				}
@@ -250,11 +265,8 @@ Example:
 						CreatedAt: now,
 						UpdatedAt: now,
 					}
-					if err := appCtx.projectRepo.Save(project); err != nil {
-						return fmt.Errorf("save new project: %w", err)
-					}
-					if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-						return fmt.Errorf("sync new project: %w", err)
+					if err := appCtx.PersistProject(project); err != nil {
+						return fmt.Errorf("persist new project: %w", err)
 					}
 					task.ProjectID = &project.ID
 					task.AreaID = nil
@@ -263,33 +275,31 @@ Example:
 					task.AreaID = nil
 				}
 
-				if parsed.AreaName != nil {
-					area := &domain.Area{
-						ID:        uuid.New().String(),
-						Name:      *parsed.AreaName,
-						CreatedAt: now,
-						UpdatedAt: now,
-					}
-					if err := appCtx.areaRepo.Save(area); err != nil {
-						return fmt.Errorf("save new area: %w", err)
-					}
-					if err := appCtx.syncEngine.SyncArea(context.Background(), area); err != nil {
-						return fmt.Errorf("sync new area: %w", err)
-					}
-					task.AreaID = &area.ID
-					if task.ProjectID != nil {
-						task.AreaID = nil
-					}
-				} else if parsed.AreaID != nil {
-					task.AreaID = parsed.AreaID
-					if task.ProjectID != nil {
-						task.AreaID = nil
+				// Explicit area token without a project token in this parse: move
+				// to the area (clear project). If both project and area tokens
+				// appear, project wins (handled above; skip area when project set).
+				projectInParse := parsed.ProjectTitle != nil || parsed.ProjectID != nil
+				if !projectInParse {
+					if parsed.AreaName != nil {
+						area := &domain.Area{
+							ID:        uuid.New().String(),
+							Name:      *parsed.AreaName,
+							CreatedAt: now,
+							UpdatedAt: now,
+						}
+						if err := appCtx.PersistArea(area); err != nil {
+							return fmt.Errorf("persist new area: %w", err)
+						}
+						task.AreaID = &area.ID
+						task.ProjectID = nil
+					} else if parsed.AreaID != nil {
+						task.AreaID = parsed.AreaID
+						task.ProjectID = nil
 					}
 				}
+				// Only change assignee when % is present; omit means leave as-is.
 				if parsed.AssignedTo != nil {
 					task.AssignedTo = *parsed.AssignedTo
-				} else {
-					task.AssignedTo = ""
 				}
 				if parsed.Description != nil {
 					task.Description = *parsed.Description
@@ -330,12 +340,26 @@ Example:
 			}
 			task.UpdatedAt = time.Now()
 		}
-		if cmd.Flags().Changed("area-id") {
-			if areaID, _ := cmd.Flags().GetString("area-id"); areaID != "" {
-				task.AreaID = &areaID
-				if task.ProjectID != nil {
-					task.AreaID = nil
+		// Explicit --area / --area-id: last container wins — set area, clear project.
+		if cmd.Flags().Changed("area-id") || cmd.Flags().Changed("area") {
+			areaID, _ := cmd.Flags().GetString("area-id")
+			if areaID == "" {
+				if areaName, _ := cmd.Flags().GetString("area"); areaName != "" {
+					areas, _ := appCtx.areaRepo.List()
+					for _, a := range areas {
+						if a.Name == areaName && a.DeletedAt == nil {
+							areaID = a.ID
+							break
+						}
+					}
+					if areaID == "" {
+						return fmt.Errorf("%w: area %q not found", domain.ErrValidation, areaName)
+					}
 				}
+			}
+			if areaID != "" {
+				task.AreaID = &areaID
+				task.ProjectID = nil
 			} else {
 				task.AreaID = nil
 			}
@@ -385,24 +409,21 @@ Example:
 			return err
 		}
 
-		if err := appCtx.taskRepo.Save(task); err != nil {
-			return fmt.Errorf("save task: %w", err)
-		}
-
 		now = time.Now()
-		if err := appCtx.syncEngine.SyncTask(context.Background(), task, now); err != nil {
-			return fmt.Errorf("sync task: %w", err)
+		if err := appCtx.PersistTask(task, now); err != nil {
+			return fmt.Errorf("persist task: %w", err)
 		}
 
-		// Recurring task automation: completing a recurring task spawns the next occurrence.
-		if (task.Status == domain.TaskStatusDone || task.Status == domain.TaskStatusArchived) && task.Recurrence != nil {
+		// Recurring task automation: spawn only on transition into done/archived
+		// (business rule §6), not on every re-save of an already completed instance.
+		justCompleted := (task.Status == domain.TaskStatusDone || task.Status == domain.TaskStatusArchived) &&
+			previousStatus != domain.TaskStatusDone &&
+			previousStatus != domain.TaskStatusArchived
+		if justCompleted && task.Recurrence != nil {
 			nextTask := task.DuplicateRecurringTask(uuid.New().String(), now, previousStatus)
 			if nextTask != nil {
-				if err := appCtx.taskRepo.Save(nextTask); err != nil {
-					return fmt.Errorf("save next recurring occurrence: %w", err)
-				}
-				if err := appCtx.syncEngine.SyncTask(context.Background(), nextTask, now); err != nil {
-					return fmt.Errorf("sync next recurring occurrence: %w", err)
+				if err := appCtx.PersistTask(nextTask, now); err != nil {
+					return fmt.Errorf("persist next recurring occurrence: %w", err)
 				}
 			}
 		}
@@ -436,19 +457,33 @@ Example:
 
 		if projectStalled {
 			respData = map[string]interface{}{
-				"task":                   task,
+				"task":                   decorateTask(task, invalidDateCommands),
 				"project_stalled":        true,
 				"next_action_candidates": candidates,
 			}
 		} else {
 			respData = map[string]interface{}{
-				"task": task,
+				"task": decorateTask(task, invalidDateCommands),
 			}
 		}
 
 		printSuccess(respData)
 		return nil
 	},
+}
+
+// decorateTask merges coherence warnings and parser invalid-date feedback for JSON output.
+func decorateTask(t *domain.Task, invalidDateCommands []string) interface{} {
+	warnings := domain.ValidateTaskCoherence(t)
+	warnings = append(warnings, invalidDateCommands...)
+	if len(warnings) == 0 && len(invalidDateCommands) == 0 {
+		return t
+	}
+	out := &TaskOutput{Task: t, Warnings: warnings}
+	if len(invalidDateCommands) > 0 {
+		out.InvalidDateCommands = invalidDateCommands
+	}
+	return out
 }
 
 // rejectArchivedProject blocks task create/update when the container project is archived.
@@ -534,12 +569,8 @@ Soft-deleted tasks are excluded from normal list commands but remain in history.
 		now := time.Now()
 		task.SoftDelete(now)
 
-		if err := appCtx.taskRepo.Save(task); err != nil {
-			return fmt.Errorf("save task: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncTask(context.Background(), task, now); err != nil {
-			return fmt.Errorf("sync task: %w", err)
+		if err := appCtx.PersistTask(task, now); err != nil {
+			return fmt.Errorf("persist task: %w", err)
 		}
 
 		printSuccess(task)
@@ -565,14 +596,11 @@ var taskRestoreCmd = &cobra.Command{
 			return fmt.Errorf("task not found: %w", err)
 		}
 
-		task.Restore(time.Now())
+		now := time.Now()
+		task.Restore(now)
 
-		if err := appCtx.taskRepo.Save(task); err != nil {
-			return fmt.Errorf("save task: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncTask(context.Background(), task, time.Now()); err != nil {
-			return fmt.Errorf("sync task: %w", err)
+		if err := appCtx.PersistTask(task, now); err != nil {
+			return fmt.Errorf("persist task: %w", err)
 		}
 
 		printSuccess(task)
@@ -682,11 +710,8 @@ Resets status to 'next' and clears completedAt so the clone is actionable.`,
 		clone.UpdateStatus(domain.TaskStatusNext, now)
 		clone.CompletedAt = nil
 
-		if err := appCtx.taskRepo.Save(&clone); err != nil {
-			return fmt.Errorf("save duplicated task: %w", err)
-		}
-		if err := appCtx.syncEngine.SyncTask(context.Background(), &clone, now); err != nil {
-			return fmt.Errorf("sync duplicated task: %w", err)
+		if err := appCtx.PersistTask(&clone, now); err != nil {
+			return fmt.Errorf("persist duplicated task: %w", err)
 		}
 
 		printSuccess(map[string]interface{}{
@@ -754,11 +779,8 @@ Clears the task's area association (container exclusivity). The task is preserve
 				areaID := *task.AreaID
 				project.AreaID = &areaID
 			}
-			if err := appCtx.projectRepo.Save(project); err != nil {
-				return fmt.Errorf("save new project: %w", err)
-			}
-			if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-				return fmt.Errorf("sync new project: %w", err)
+			if err := appCtx.PersistProject(project); err != nil {
+				return fmt.Errorf("persist new project: %w", err)
 			}
 		}
 
@@ -766,11 +788,8 @@ Clears the task's area association (container exclusivity). The task is preserve
 		task.AreaID = nil
 		task.UpdatedAt = now
 
-		if err := appCtx.taskRepo.Save(task); err != nil {
-			return fmt.Errorf("save task: %w", err)
-		}
-		if err := appCtx.syncEngine.SyncTask(context.Background(), task, now); err != nil {
-			return fmt.Errorf("sync task: %w", err)
+		if err := appCtx.PersistTask(task, now); err != nil {
+			return fmt.Errorf("persist task: %w", err)
 		}
 
 		printSuccess(map[string]interface{}{
@@ -821,11 +840,13 @@ func buildTaskQueryFilter(cmd *cobra.Command, appCtx *appContext) *sqlite.TaskQu
 func init() {
 	taskAddCmd.Flags().String("project-id", "", "Project ID")
 	taskAddCmd.Flags().String("area-id", "", "Area ID")
+	taskAddCmd.Flags().String("area", "", "Area name (sets area, clears project)")
 	taskAddCmd.Flags().String("assigned-to", "", "Assigned To")
 
 	taskUpdateCmd.Flags().String("status", "", "Status of the task")
 	taskUpdateCmd.Flags().String("project-id", "", "Project ID")
-	taskUpdateCmd.Flags().String("area-id", "", "Area ID")
+	taskUpdateCmd.Flags().String("area-id", "", "Area ID (sets area, clears project)")
+	taskUpdateCmd.Flags().String("area", "", "Area name (sets area, clears project)")
 	taskUpdateCmd.Flags().String("assigned-to", "", "Assigned To")
 	taskUpdateCmd.Flags().String("start-offset", "", "Relative start offset (JSON or \"-1 day\")")
 	taskUpdateCmd.Flags().String("recurrence", "", "Recurrence rule JSON (e.g. {\"rule\":\"daily\"})")

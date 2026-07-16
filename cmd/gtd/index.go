@@ -19,8 +19,8 @@ var indexCmd = &cobra.Command{
 var indexRebuildCmd = &cobra.Command{
 	Use:   "rebuild",
 	Short: "Rebuild the sqlite index from disk",
-	Long: `Rebuilds the sqlite database index.db by scanning all active Markdown files in the workspace directories (tasks, projects, areas, sections, people, saved_filters).
-Run this command at the start of a session or during a Weekly Review to ensure data consistency.`,
+	Long: `Rebuilds the sqlite database index.db by scanning all active Markdown files in the workspace directories (tasks, projects, areas, people).
+Run this command at the start of a session or during a Weekly Review to ensure data consistency after external file edits.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		gtdDir, err := getWorkspaceDir()
 		if err != nil {

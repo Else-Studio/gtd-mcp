@@ -13,8 +13,8 @@ var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Bootstraps the workspace",
 	Long: `Initializes the local GTD workspace.
-Creates the directory structures for tasks, projects, areas, sections, people, and saved filters under the GTD workspace (defaults to ~/.gtd or GTD_DIR environment variable).
-Also initializes an empty config.yml file and the sqlite database index.db.`,
+Creates the directory structures for tasks, projects, areas, and people under the GTD workspace (defaults to ~/.gtd or GTD_DIR environment variable).
+Also creates an empty config.yml placeholder (not loaded in V1 — effective config is GTD_DIR only) and the sqlite database index.db.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		gtdDir, err := getWorkspaceDir()
 		if err != nil {

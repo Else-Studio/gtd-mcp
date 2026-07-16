@@ -163,6 +163,8 @@ func registerTools(s *server.MCPServer) {
 	projectAddTool := mcp.NewTool("gtd_project_add",
 		mcp.WithDescription("Add a new project. "+coachInstruction),
 		mcp.WithString("title", mcp.Required(), mcp.Description("The project title")),
+		mcp.WithString("area_id", mcp.Description("Optional area ID to associate with the project")),
+		mcp.WithString("area", mcp.Description("Optional area name (creates the area if it does not exist)")),
 	)
 	s.AddTool(projectAddTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		argsMap, ok := request.Params.Arguments.(map[string]interface{})
@@ -170,7 +172,14 @@ func registerTools(s *server.MCPServer) {
 			return mcp.NewToolResultError("invalid arguments"), nil
 		}
 		title, _ := argsMap["title"].(string)
-		return executeCLI("project", "add", title)
+		args := []string{"project", "add", title}
+		if v, ok := argsMap["area_id"].(string); ok && v != "" {
+			args = append(args, "--area-id", v)
+		}
+		if v, ok := argsMap["area"].(string); ok && v != "" {
+			args = append(args, "--area", v)
+		}
+		return executeCLI(args...)
 	})
 
 	projectUpdateTool := mcp.NewTool("gtd_project_update",

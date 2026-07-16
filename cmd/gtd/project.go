@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -58,8 +57,9 @@ The project is initialized in the 'active' status. Returns the JSON project repr
 					CreatedAt: now,
 					UpdatedAt: now,
 				}
-				appCtx.areaRepo.Save(found)
-				appCtx.syncEngine.SyncArea(context.Background(), found)
+				if err := appCtx.PersistArea(found); err != nil {
+					return fmt.Errorf("persist new area: %w", err)
+				}
 			}
 			areaID = found.ID
 		}
@@ -68,12 +68,8 @@ The project is initialized in the 'active' status. Returns the JSON project repr
 			project.AreaID = &areaID
 		}
 
-		if err := appCtx.projectRepo.Save(project); err != nil {
-			return fmt.Errorf("save project: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-			return fmt.Errorf("sync project: %w", err)
+		if err := appCtx.PersistProject(project); err != nil {
+			return fmt.Errorf("persist project: %w", err)
 		}
 
 		printSuccess(project)
@@ -126,8 +122,9 @@ The --status flag allows changing the status of the project (e.g. active, someda
 					CreatedAt: now,
 					UpdatedAt: now,
 				}
-				appCtx.areaRepo.Save(found)
-				appCtx.syncEngine.SyncArea(context.Background(), found)
+				if err := appCtx.PersistArea(found); err != nil {
+					return fmt.Errorf("persist new area: %w", err)
+				}
 			}
 			areaID = found.ID
 		}
@@ -141,12 +138,8 @@ The --status flag allows changing the status of the project (e.g. active, someda
 			project.UpdatedAt = time.Now()
 		}
 
-		if err := appCtx.projectRepo.Save(project); err != nil {
-			return fmt.Errorf("save project: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-			return fmt.Errorf("sync project: %w", err)
+		if err := appCtx.PersistProject(project); err != nil {
+			return fmt.Errorf("persist project: %w", err)
 		}
 
 		printSuccess(project)
@@ -181,22 +174,15 @@ Soft-deleted projects are hidden from normal list views.`,
 		now := time.Now()
 		project.SoftDelete(now, tasks)
 
-		if err := appCtx.projectRepo.Save(project); err != nil {
-			return fmt.Errorf("save project: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-			return fmt.Errorf("sync project: %w", err)
+		if err := appCtx.PersistProject(project); err != nil {
+			return fmt.Errorf("persist project: %w", err)
 		}
 
 		// Persist cascade soft-deletes on child tasks.
 		for _, t := range tasks {
 			if t.ProjectID != nil && *t.ProjectID == project.ID {
-				if err := appCtx.taskRepo.Save(t); err != nil {
-					return fmt.Errorf("save cascaded task: %w", err)
-				}
-				if err := appCtx.syncEngine.SyncTask(context.Background(), t, now); err != nil {
-					return fmt.Errorf("sync cascaded task: %w", err)
+				if err := appCtx.PersistTask(t, now); err != nil {
+					return fmt.Errorf("persist cascaded task: %w", err)
 				}
 			}
 		}
@@ -230,25 +216,32 @@ var projectRestoreCmd = &cobra.Command{
 		}
 
 		now := time.Now()
-		project.Restore(now, tasks)
-
-		if err := appCtx.projectRepo.Save(project); err != nil {
-			return fmt.Errorf("save project: %w", err)
-		}
-		if err := appCtx.syncEngine.SyncProject(context.Background(), project); err != nil {
-			return fmt.Errorf("sync project: %w", err)
-		}
-
-		for _, t := range tasks {
-			if t.ProjectID != nil && *t.ProjectID == project.ID {
-				appCtx.taskRepo.Save(t)
-				appCtx.syncEngine.SyncTask(context.Background(), t, now)
-			}
+		if err := restoreProjectWithCascade(appCtx, project, tasks, now); err != nil {
+			return err
 		}
 
 		printSuccess(project)
 		return nil
 	},
+}
+
+// restoreProjectWithCascade restores a project and persists every child task
+// that belongs to it. Fail-closed: any Persist* error aborts the cascade.
+func restoreProjectWithCascade(appCtx *appContext, project *domain.Project, tasks []*domain.Task, now time.Time) error {
+	project.Restore(now, tasks)
+
+	if err := appCtx.PersistProject(project); err != nil {
+		return fmt.Errorf("persist project: %w", err)
+	}
+
+	for _, t := range tasks {
+		if t.ProjectID != nil && *t.ProjectID == project.ID {
+			if err := appCtx.PersistTask(t, now); err != nil {
+				return fmt.Errorf("persist cascaded task: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 var projectListCmd = &cobra.Command{

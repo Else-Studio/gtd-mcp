@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -35,12 +34,8 @@ var peopleAddCmd = &cobra.Command{
 			Name: name,
 		}
 
-		if err := appCtx.personRepo.Save(person); err != nil {
-			return fmt.Errorf("save person: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncPerson(context.Background(), person); err != nil {
-			return fmt.Errorf("sync person: %w", err)
+		if err := appCtx.PersistPerson(person); err != nil {
+			return fmt.Errorf("persist person: %w", err)
 		}
 
 		printSuccess(person)
@@ -69,12 +64,8 @@ var peopleDeleteCmd = &cobra.Command{
 		now := time.Now()
 		person.SoftDelete(now)
 
-		if err := appCtx.personRepo.Save(person); err != nil {
-			return fmt.Errorf("save person: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncPerson(context.Background(), person); err != nil {
-			return fmt.Errorf("sync person: %w", err)
+		if err := appCtx.PersistPerson(person); err != nil {
+			return fmt.Errorf("persist person: %w", err)
 		}
 
 		printSuccess(person)
@@ -134,12 +125,8 @@ var peopleUpdateCmd = &cobra.Command{
 			person.UpdatedAt = time.Now()
 		}
 
-		if err := appCtx.personRepo.Save(person); err != nil {
-			return fmt.Errorf("save person: %w", err)
-		}
-
-		if err := appCtx.syncEngine.SyncPerson(context.Background(), person); err != nil {
-			return fmt.Errorf("sync person: %w", err)
+		if err := appCtx.PersistPerson(person); err != nil {
+			return fmt.Errorf("persist person: %w", err)
 		}
 
 		printSuccess(person)

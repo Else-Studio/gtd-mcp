@@ -57,14 +57,16 @@ func getWorkspaceDir() (string, error) {
 	return dir, nil
 }
 
+// appContext wires file repos (source of truth) and the SQLite read index.
+// All entity writes go through Persist* (file first, then Sync). See persist.go.
 type appContext struct {
 	db          *sql.DB
 	syncEngine  *sqlite.SyncEngine
 	taskQuery   *sqlite.TaskQuery
-	taskRepo    *fs.TaskRepository
-	projectRepo *fs.ProjectRepository
-	areaRepo    *fs.AreaRepository
-	personRepo  *fs.PersonRepository
+	taskRepo    domain.TaskRepository
+	projectRepo domain.ProjectRepository
+	areaRepo    domain.AreaRepository
+	personRepo  domain.PersonRepository
 	cleanup     func()
 }
 
@@ -110,7 +112,8 @@ func init() {
 
 type TaskOutput struct {
 	*domain.Task
-	Warnings []string `json:"warnings,omitempty"`
+	Warnings              []string `json:"warnings,omitempty"`
+	InvalidDateCommands   []string `json:"invalidDateCommands,omitempty"`
 }
 
 func formatOutputData(data interface{}) interface{} {
@@ -120,6 +123,9 @@ func formatOutputData(data interface{}) interface{} {
 		if len(warnings) > 0 {
 			return &TaskOutput{Task: v, Warnings: warnings}
 		}
+		return v
+	case *TaskOutput:
+		// Already decorated (e.g. parse invalid-date feedback); leave as-is.
 		return v
 	case []*domain.Task:
 		var out []interface{}

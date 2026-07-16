@@ -34,7 +34,9 @@ var nextCmd = &cobra.Command{
 	Use:   "next",
 	Short: "Shortcut for 'gtd task list next'",
 	Long: `Lists all active, actionable tasks with 'next' status.
-These are ready to be worked on immediately. Default returns a JSON list of IDs. Supports --plain for a task table.`,
+These are ready to be worked on immediately. Accepts the same filters as
+task list next (--area, --area-id, --project, --project-id, --context,
+--assigned-to). Default returns a JSON list of IDs. Supports --plain for a task table.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appCtx, err := getAppContext()
 		if err != nil {
@@ -42,7 +44,8 @@ These are ready to be worked on immediately. Default returns a JSON list of IDs.
 		}
 		defer appCtx.cleanup()
 
-		ids, err := appCtx.taskQuery.ListNextTasks(context.Background())
+		filter := buildTaskQueryFilter(cmd, appCtx)
+		ids, err := appCtx.taskQuery.ListNextTasks(context.Background(), filter)
 		if err != nil {
 			return fmt.Errorf("list next: %w", err)
 		}
@@ -77,10 +80,12 @@ Used during Reflect/Weekly Review to identify outcomes requiring a new action st
 var agendaCmd = &cobra.Command{
 	Use:   "agenda",
 	Short: "List tasks for the agenda (due or starting now or before)",
-	Long: `Retrieves the immediate focus agenda.
-Returns active tasks whose start date has passed, or due date is today or overdue. 
-Note: Due dates without a specific time are treated as starting at 23:59:59.999 local time.
-Default returns a JSON list of task IDs. Supports --plain for a task table.`,
+	Long: `Retrieves the immediate focus agenda ("What's Important Now").
+Returns active (non-reference) tasks whose start time has passed, or whose due
+date is today or earlier. Date-only dues use calendar-day comparison (due today
+is included all day); timed dues use full timestamps. Soft-deleted, done, and
+archived tasks are excluded. Default returns a JSON list of task IDs. Supports
+--plain for a task table.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appCtx, err := getAppContext()
 		if err != nil {
@@ -100,12 +105,14 @@ Default returns a JSON list of task IDs. Supports --plain for a task table.`,
 }
 
 func init() {
-	agendaCmd.Flags().String("area-id", "", "Filter by Area ID")
-	agendaCmd.Flags().String("area", "", "Filter by Area Name")
-	agendaCmd.Flags().String("project-id", "", "Filter by Project ID")
-	agendaCmd.Flags().String("project", "", "Filter by Project Title")
-	agendaCmd.Flags().String("context", "", "Filter by Context")
-	agendaCmd.Flags().String("assigned-to", "", "Filter by Assigned To")
+	for _, c := range []*cobra.Command{nextCmd, agendaCmd} {
+		c.Flags().String("area-id", "", "Filter by Area ID")
+		c.Flags().String("area", "", "Filter by Area Name")
+		c.Flags().String("project-id", "", "Filter by Project ID")
+		c.Flags().String("project", "", "Filter by Project Title")
+		c.Flags().String("context", "", "Filter by Context")
+		c.Flags().String("assigned-to", "", "Filter by Assigned To")
+	}
 
 	rootCmd.AddCommand(inboxCmd)
 	rootCmd.AddCommand(nextCmd)

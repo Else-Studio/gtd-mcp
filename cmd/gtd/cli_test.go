@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gtd/internal/domain"
@@ -376,4 +377,85 @@ func TestCLI_Shortcuts(t *testing.T) {
 	if !foundStalled {
 		t.Errorf("expected to find stalled project ID %s in stalled list", projectID)
 	}
+}
+
+// TestCLI_HelpText_NoSectionsOrSavedFilters locks R14: init/index help no longer
+// mentions removed structural dirs.
+func TestCLI_HelpText_NoSectionsOrSavedFilters(t *testing.T) {
+	runHelp := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command(cliPath, args...)
+		out, err := cmd.CombinedOutput()
+		// cobra --help exits 0
+		if err != nil {
+			t.Fatalf("help %v failed: %v, output: %s", args, err, out)
+		}
+		return string(out)
+	}
+
+	for _, args := range [][]string{
+		{"init", "--help"},
+		{"index", "rebuild", "--help"},
+	} {
+		text := strings.ToLower(runHelp(args...))
+		if strings.Contains(text, "sections") || strings.Contains(text, "saved_filters") || strings.Contains(text, "saved filters") {
+			t.Errorf("%v help still mentions sections/saved filters:\n%s", args, text)
+		}
+		for _, want := range []string{"tasks", "projects", "areas", "people"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%v help missing %q:\n%s", args, want, text)
+			}
+		}
+	}
+}
+
+// TestCLI_NextShortcut_AcceptsAreaFilter locks R5: gtd next accepts the same
+// filter flags as task list (and MCP gtd_get_next).
+func TestCLI_NextShortcut_AcceptsAreaFilter(t *testing.T) {
+	workspaceDir := t.TempDir()
+
+	runCLIJSON := func(args ...string) map[string]interface{} {
+		t.Helper()
+		cmd := exec.Command(cliPath, args...)
+		cmd.Env = append(os.Environ(), "GTD_DIR="+workspaceDir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("command %v failed: %v, output: %s", args, err, out)
+		}
+		var result map[string]interface{}
+		if err := json.Unmarshal(out, &result); err != nil {
+			t.Fatalf("invalid JSON for %v: %v, output: %s", args, err, out)
+		}
+		if success, ok := result["success"].(bool); !ok || !success {
+			t.Fatalf("expected success for %v, got: %s", args, out)
+		}
+		return result
+	}
+
+	runCLIJSON("init")
+	workArea := runCLIJSON("area", "add", "Work")
+	workID := workArea["data"].(map[string]interface{})["id"].(string)
+	runCLIJSON("area", "add", "Life")
+
+	runCLIJSON("task", "add", "W !Work /next")
+	runCLIJSON("task", "add", "L !Life /next")
+
+	assertOnlyTitle := func(args []string, wantTitle string) {
+		t.Helper()
+		res := runCLIJSON(args...)
+		items, ok := res["data"].([]interface{})
+		if !ok {
+			t.Fatalf("expected task list data for %v", args)
+		}
+		if len(items) != 1 {
+			t.Fatalf("%v: expected 1 task, got %d (%v)", args, len(items), items)
+		}
+		title, _ := items[0].(map[string]interface{})["title"].(string)
+		if title != wantTitle {
+			t.Errorf("%v: expected title %q, got %q", args, wantTitle, title)
+		}
+	}
+
+	assertOnlyTitle([]string{"next", "--area", "Work"}, "W")
+	assertOnlyTitle([]string{"next", "--area-id", workID}, "W")
 }

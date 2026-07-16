@@ -1,11 +1,17 @@
 package main_test
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"gtd/internal/persistence/fs"
+
+	_ "github.com/ncruces/go-sqlite3/driver"
 )
 
 func runCmdE2E(t *testing.T, workspaceDir string, args ...string) map[string]interface{} {
@@ -174,41 +180,153 @@ func TestE2E_ComprehensiveFlow(t *testing.T) {
 	}
 }
 
-func TestE2E_TaskDelegateClear(t *testing.T) {
+// TestE2E_TaskAddDoneSetsCompletedAt locks R6: NLP /done on create sets completedAt
+// on the JSON payload and the markdown file (not SQL-only normalize).
+func TestE2E_TaskAddDoneSetsCompletedAt(t *testing.T) {
 	workspaceDir := t.TempDir()
-
-	// 1. Initialize workspace
 	runCmdE2E(t, workspaceDir, "init")
 
-	// 2. Create a task with a delegate
+	result := runCmdE2E(t, workspaceDir, "task", "add", "Finished already /done")
+	data, ok := result["data"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected task data object")
+	}
+	if status, _ := data["status"].(string); status != "done" {
+		t.Errorf("expected status done, got %q", status)
+	}
+	completedAt, _ := data["completedAt"].(string)
+	if completedAt == "" {
+		t.Errorf("expected data.completedAt non-null/non-empty")
+	}
+	taskID, _ := data["id"].(string)
+	if taskID == "" {
+		t.Fatalf("expected task id")
+	}
+
+	taskRepo := fs.NewTaskRepository(filepath.Join(workspaceDir, "tasks"))
+	fileTask, err := taskRepo.Get(taskID)
+	if err != nil {
+		t.Fatalf("load task file: %v", err)
+	}
+	if fileTask.CompletedAt == nil {
+		t.Errorf("expected tasks/%s.md frontmatter completedAt present", taskID)
+	}
+
+	// Dual-store: index row also has completedAt (R0 agreement).
+	db, err := sql.Open("sqlite3", filepath.Join(workspaceDir, "index.db"))
+	if err != nil {
+		t.Fatalf("open index.db: %v", err)
+	}
+	defer db.Close()
+	var sqlCompleted sql.NullString
+	if err := db.QueryRow(`SELECT completedAt FROM tasks WHERE id = ?`, taskID).Scan(&sqlCompleted); err != nil {
+		t.Fatalf("query index: %v", err)
+	}
+	if !sqlCompleted.Valid || sqlCompleted.String == "" {
+		t.Errorf("expected index.db completedAt non-null")
+	}
+}
+
+// TestE2E_TaskDelegateClear (R8): NLP text update without % keeps assignee;
+// explicit --assigned-to "" clears it.
+func TestE2E_TaskDelegateClear(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
 	taskResult := runCmdE2E(t, workspaceDir, "task", "add", "Delegate task %VH")
-	taskOutput, ok := taskResult["data"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected task object in data")
-	}
-	taskID, ok := taskOutput["id"].(string)
-	if !ok {
-		t.Fatalf("expected task id to be string")
-	}
-	assignedTo, _ := taskOutput["assignedTo"].(string)
-	if assignedTo != "VH" {
-		t.Errorf("expected assignee to be 'VH', got %q", assignedTo)
+	taskOutput := taskResult["data"].(map[string]interface{})
+	taskID := taskOutput["id"].(string)
+	if assignedTo, _ := taskOutput["assignedTo"].(string); assignedTo != "VH" {
+		t.Fatalf("expected assignee VH, got %q", assignedTo)
 	}
 
-	// 3. Update task omitting the % symbol
+	// Text update without % must preserve assignee.
 	updateResult := runCmdE2E(t, workspaceDir, "task", "update", taskID, "Delegate task updated")
-	updateOutput, ok := updateResult["data"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected task object in data")
+	taskObj := updateResult["data"].(map[string]interface{})["task"].(map[string]interface{})
+	if assignedTo, _ := taskObj["assignedTo"].(string); assignedTo != "VH" {
+		t.Errorf("expected assignee still VH after text update, got %q", assignedTo)
 	}
 
-	taskObj, ok := updateOutput["task"].(map[string]interface{})
-	if !ok {
-		t.Fatalf("expected task object in update data")
+	// Explicit clear via flag.
+	clearResult := runCmdE2E(t, workspaceDir, "task", "update", taskID, "--assigned-to", "")
+	cleared := clearResult["data"].(map[string]interface{})["task"].(map[string]interface{})
+	if assignedTo, ok := cleared["assignedTo"].(string); ok && assignedTo != "" {
+		t.Errorf("expected assignee cleared via --assigned-to \"\", got %q", assignedTo)
 	}
-	assignedTo, ok = taskObj["assignedTo"].(string)
-	if ok && assignedTo != "" {
-		t.Errorf("expected assignee to be cleared, got %q", assignedTo)
+}
+
+// TestE2E_TaskUpdateDueDoesNotClearAssignee (R8): date-only NLP update preserves assignee.
+func TestE2E_TaskUpdateDueDoesNotClearAssignee(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	taskResult := runCmdE2E(t, workspaceDir, "task", "add", "Call %Bob /waiting")
+	taskID := taskResult["data"].(map[string]interface{})["id"].(string)
+
+	updateResult := runCmdE2E(t, workspaceDir, "task", "update", taskID, "/due:2026-08-01")
+	taskObj := updateResult["data"].(map[string]interface{})["task"].(map[string]interface{})
+	if assignedTo, _ := taskObj["assignedTo"].(string); assignedTo != "Bob" {
+		t.Errorf("expected assignedTo still Bob, got %q", assignedTo)
+	}
+	if due, _ := taskObj["dueDate"].(string); due == "" {
+		t.Errorf("expected dueDate set after /due update")
+	}
+}
+
+// TestE2E_TaskUpdate_ExplicitAreaClearsProject (R9): explicit --area moves task off project.
+func TestE2E_TaskUpdate_ExplicitAreaClearsProject(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	runCmdE2E(t, workspaceDir, "area", "add", "Personal")
+	taskResult := runCmdE2E(t, workspaceDir, "task", "add", `Step one +"Ship Feature" /next`)
+	taskID := taskResult["data"].(map[string]interface{})["id"].(string)
+	if _, ok := taskResult["data"].(map[string]interface{})["projectId"].(string); !ok {
+		t.Fatalf("expected task linked to project")
+	}
+
+	updateResult := runCmdE2E(t, workspaceDir, "task", "update", taskID, "--area", "Personal")
+	taskObj := updateResult["data"].(map[string]interface{})["task"].(map[string]interface{})
+	if areaID, _ := taskObj["areaId"].(string); areaID == "" {
+		t.Errorf("expected areaId set after --area Personal")
+	}
+	if proj, ok := taskObj["projectId"]; ok && proj != nil && proj != "" {
+		t.Errorf("expected projectId cleared, got %v", proj)
+	}
+}
+
+// TestE2E_TaskAdd_InvalidDateCommandWarning (R10): invalid /start: surfaces in response.
+func TestE2E_TaskAdd_InvalidDateCommandWarning(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	result := runCmdE2E(t, workspaceDir, "task", "add", "Task /start:monx /due:tomorrow")
+	data := result["data"].(map[string]interface{})
+	if _, ok := data["startTime"]; ok && data["startTime"] != nil {
+		t.Errorf("expected startTime absent, got %v", data["startTime"])
+	}
+	if due, _ := data["dueDate"].(string); due == "" {
+		t.Errorf("expected dueDate present from /due:tomorrow")
+	}
+
+	found := false
+	// Accept warnings or invalidDateCommands.
+	if warnings, ok := data["warnings"].([]interface{}); ok {
+		for _, w := range warnings {
+			if s, ok := w.(string); ok && strings.Contains(s, "/start:monx") {
+				found = true
+			}
+		}
+	}
+	if inv, ok := data["invalidDateCommands"].([]interface{}); ok {
+		for _, w := range inv {
+			if s, ok := w.(string); ok && strings.Contains(s, "/start:monx") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("expected /start:monx in warnings or invalidDateCommands, got %v", data)
 	}
 }
 
