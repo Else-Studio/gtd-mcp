@@ -25,10 +25,12 @@ Allows adding, updating, listing, deleting, and restoring tasks. Default output 
 }
 
 var taskAddCmd = &cobra.Command{
-	Use:   "add <text>",
+	Use:   "add [text...]",
 	Short: "Add a new task",
 	Long: `Add a new task using the quick-add NLP parser.
-The parser processes the text string to instantly extract metadata.
+All words after add (and any flags) are joined into one string and parsed — shell
+quotes around the whole task are optional for plain capture.
+
 Unquoted entity tokens are a single word only; use quotes for multi-word names:
   +Project       Binds task to a project (one word; use +"Kitchen Sink" for multi-word)
   !Area          Binds task to an Area of Focus if no project is assigned (!"Work Home")
@@ -43,14 +45,19 @@ Unquoted entity tokens are a single word only; use quotes for multi-word names:
   /reference     Sets status directly to 'reference' note
   /done          Sets status to done (sets completedAt)
 
-Example:
-  gtd task add "Email Bob about proposal %Bob @computer +\"Work Migration\" /due:tomorrow"
-  gtd add "…"   # root shortcut for the same command
+Shell note: still quote when the shell would eat characters (especially # comments,
+$ variables, * globs) or when NLP needs quoted multi-word entities.
+
+Examples:
+  gtd add Call the plumber about the leak
+  gtd add Email Bob about proposal %Bob @computer /due:tomorrow
+  gtd task add Email Bob about proposal %Bob @computer +"Work Migration" /due:tomorrow
+  gtd add "Fix login #urgent"   # quotes protect # from the shell
 
 Returns a JSON task object containing fields like id, title, status, contexts, tags, and warnings. In plain mode, prints a single-row task table.`,
-	Args:  cobra.ExactArgs(1),
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		text := args[0]
+		text := strings.Join(args, " ")
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err

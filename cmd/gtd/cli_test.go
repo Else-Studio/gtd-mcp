@@ -379,7 +379,8 @@ func TestCLI_Shortcuts(t *testing.T) {
 	}
 
 	// Root `gtd add` is a shortcut for `gtd task add` (quick capture).
-	cmdAdd := exec.Command(cliPath, "add", "Captured via root shortcut")
+	// Multi-word args are joined so shell quotes around the whole task are optional.
+	cmdAdd := exec.Command(cliPath, "add", "Captured", "via", "root", "shortcut", "@phone", "/next")
 	cmdAdd.Env = env
 	outAdd, err := cmdAdd.CombinedOutput()
 	if err != nil {
@@ -397,10 +398,16 @@ func TestCLI_Shortcuts(t *testing.T) {
 		t.Fatalf("expected task object in add data, got: %s", outAdd)
 	}
 	if title, _ := addData["title"].(string); title != "Captured via root shortcut" {
-		t.Errorf("expected title from add shortcut, got %v", addData["title"])
+		t.Errorf("expected joined title from add shortcut, got %v", addData["title"])
 	}
-	if status, _ := addData["status"].(string); status != "inbox" {
-		t.Errorf("expected inbox status, got %v", addData["status"])
+	if status, _ := addData["status"].(string); status != "next" {
+		t.Errorf("expected next status from /next token, got %v", addData["status"])
+	}
+	contexts, _ := addData["contexts"].([]interface{})
+	if len(contexts) != 1 {
+		t.Errorf("expected one context from @phone, got %v", addData["contexts"])
+	} else if c, _ := contexts[0].(string); c != "phone" && c != "@phone" {
+		t.Errorf("expected phone/@phone context, got %v", contexts[0])
 	}
 }
 

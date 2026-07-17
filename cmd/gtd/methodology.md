@@ -6,7 +6,7 @@ Agents should use **MCP tools** (`gtd_*`). Humans may use the equivalent CLI. Bo
 
 | GTD Phase | Concept | MCP tool | CLI equivalent |
 | :--- | :--- | :--- | :--- |
-| **1. Capture** | Frictionless collection into inbox | `gtd_task_add` | `gtd add "<text>"` (or `gtd task add`) |
+| **1. Capture** | Frictionless collection into inbox | `gtd_task_add` | `gtd add <words…>` (or `gtd task add`; whole-task quotes optional) |
 | **2. Clarify** | Decide meaning and next action | `gtd_get_inbox` then `gtd_task_update` | `gtd inbox` / `gtd task update` |
 | **3. Organize** | Context, project, area, status | `gtd_task_update`, entity tools | `gtd task update`, `project`/`area`/`people` |
 | **4. Reflect** | Weekly review, unstick projects | `gtd_index_rebuild`, `gtd_get_stalled`, `gtd_task_list` | `index rebuild`, `stalled`, `task list` |

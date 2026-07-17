@@ -107,14 +107,17 @@ archived tasks are excluded. Default returns a JSON list of task IDs. Supports
 // addCmd is a root shortcut for quick capture (same as `gtd task add`).
 // Flags and RunE must stay in sync with taskAddCmd.
 var addCmd = &cobra.Command{
-	Use:   "add <text>",
+	Use:   "add [text...]",
 	Short: "Shortcut for 'gtd task add'",
 	Long: `Quick-capture a task via the NLP quick-add parser.
-Same behavior as gtd task add — see that command for token syntax.
+All remaining words are joined into one string (quotes around the whole task
+are optional). Same NLP tokens as gtd task add.
 
-Example:
-  gtd add "Email Bob about proposal %Bob @computer /due:tomorrow"`,
-	Args: cobra.ExactArgs(1),
+Examples:
+  gtd add Call the plumber about the leak
+  gtd add Email Bob about proposal %Bob @computer /due:tomorrow
+  gtd add "Fix login #urgent"   # quote when the shell would eat #`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return taskAddCmd.RunE(cmd, args)
 	},
