@@ -30,9 +30,16 @@ type JSONError struct {
 	Message string `json:"message"`
 }
 
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
+)
+
 var rootCmd = &cobra.Command{
 	Use:           "gtd",
 	Short:         "AI-First GTD CLI",
+	Version:       Version,
 	Long: `The AI-First GTD CLI is a command-line interface designed to implement the David Allen Getting Things Done (GTD) framework.
 It is built primarily for integration with AI Agents (e.g. MCP Servers) but supports human-readable outputs.
 
@@ -43,6 +50,22 @@ Design Philosophy:
 4. Integrated date coherence validation surfacing warning flags without auto-correcting user inputs.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the version number of gtd",
+	Run: func(cmd *cobra.Command, args []string) {
+		if PlainOutput {
+			fmt.Printf("gtd version %s (commit: %s, date: %s)\n", Version, Commit, Date)
+			return
+		}
+		printSuccess(map[string]string{
+			"version": Version,
+			"commit":  Commit,
+			"date":    Date,
+		})
+	},
 }
 
 func getWorkspaceDir() (string, error) {
@@ -108,6 +131,7 @@ func getAppContext() (*appContext, error) {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&PlainOutput, "plain", false, "Output plain text instead of JSON")
+	rootCmd.AddCommand(versionCmd)
 }
 
 type TaskOutput struct {

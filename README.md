@@ -12,19 +12,25 @@
 
 ---
 
-## Install
+## Installation
 
-### From GitHub Releases (recommended)
+### Linux & macOS (Automated)
 
-Download a prebuilt `gtd` binary from the [Releases](https://github.com/Else-Studio/gtd-mcp/releases) page, put it on your `PATH`, and verify:
+Install the latest release directly to `~/.local/bin` using our install script:
 
 ```bash
-gtd --help
+curl -fsSL https://raw.githubusercontent.com/Else-Studio/gtd-mcp/main/install.sh | bash
 ```
+*(A shorter branded URL `https://elsestudio.dev/gtd/install` will be available soon).*
 
-> **Alpha note:** the first public release may still be in progress. Until assets appear on Releases, build from source below.
+### Windows (Manual)
 
-### From source
+1. Navigate to the [Releases](https://github.com/Else-Studio/gtd-mcp/releases) page.
+2. Download the `.zip` archive for Windows.
+3. Extract `gtd.exe` to a directory of your choice and add that directory to your system `Path`.
+4. Verify by opening a terminal and running `gtd --help`.
+
+### Build from source
 
 Requires a recent [Go](https://go.dev/dl/) toolchain.
 
