@@ -64,8 +64,10 @@ On `gtd_task_update` / `gtd_project_update`:
 * **Omit** a key → leave field unchanged.
 * Pass **empty string `""`** → clear the field (where the CLI supports clear).
 
-Clearable on tasks: `project_id`, `area_id`, `area`, `assigned_to`, `start_offset`, `recurrence`.  
+Clearable on tasks: `project_id`, `area_id`, `area`, `assigned_to`, `start_offset`, `recurrence`, `contexts`, `tags`.  
 Clearable on projects: `area_id`, `area`.
+
+For `contexts` / `tags`: empty string clears the whole list; a non-empty comma-separated value **replaces** the list (e.g. `@phone,@office`). Use this when a wrong context was assigned.
 
 ### System health resource
 Read **`gtd://state`** for counts only (`inbox_count`, `next_count`, `agenda_count`, `stalled_project_count`, `waiting_count`, `someday_count`, `workspace_ok`, `errors`). Then call the matching query tool for full lists. Cache counts within a coaching turn.
@@ -86,7 +88,7 @@ If tools fail with missing workspace errors, call **`gtd_init`** first.
    - **Non-actionable**: `status=someday` / `reference`, or `gtd_task_delete`.
 
 ### SOP 2: Reflect & Weekly Review
-1. `gtd_index_rebuild` — sync index after any external file edits.
+1. `gtd_index_rebuild` — sync index after any external file edits. After copying the workspace to a new device (rsync/Unison/manual), call **`gtd_init`** then **`gtd_index_rebuild`** so dirs and the SQLite index exist on that machine.
 2. `gtd_get_stalled` — projects with zero `next` actions; for each, list candidates (`gtd_task_list` with `project_id`) and promote one to `next` or add a step.
 3. `gtd_task_list` with `status=waiting` — review delegations.
 4. `gtd_project_list` — still relevant?
@@ -107,7 +109,7 @@ If tools fail with missing workspace errors, call **`gtd_init`** first.
 | `gtd_init` | Bootstrap workspace | — |
 | `gtd_index_rebuild` | Resync SQLite from files | — |
 | `gtd_task_add` | Capture (NLP) | `text`; optional `project_id`, `area_id`, `area`, `assigned_to` |
-| `gtd_task_update` | Clarify / organize | `id`; optional `text`, `status`, clearable fields, `start_offset`, `recurrence` |
+| `gtd_task_update` | Clarify / organize | `id`; optional `text`, `status`, clearable fields (incl. `contexts`, `tags`), `start_offset`, `recurrence` |
 | `gtd_task_list` | List by status/filters | optional `status` + shared filters |
 | `gtd_task_delete` / `gtd_task_restore` | Soft-delete / restore | `id` |
 | `gtd_task_duplicate` | Clone as next | `id` |
@@ -121,6 +123,8 @@ If tools fail with missing workspace errors, call **`gtd_init`** first.
 | `gtd_project_list` / `delete` / `restore` | CRUD | `id` where needed |
 | `gtd_area_*` | Area CRUD + cascade | `name` / `id` |
 | `gtd_people_*` | People CRUD | `name` / `id` |
+| `gtd_context_list` | Distinct contexts on tasks | — |
+| `gtd_tag_list` | Distinct tags on tasks | — |
 
 Resources: `gtd://methodology`, `gtd://guides/getting_started`, `gtd://state`.  
 Prompt: `start_gtd_session`.

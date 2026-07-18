@@ -56,7 +56,8 @@ var areaDeleteCmd = &cobra.Command{
 var areaListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List areas",
-	Long:  `Lists all active Area of Focus IDs. Defaults to JSON list output.`,
+	Long: `Lists all active Areas of Focus (id and name).
+Defaults to JSON. When --plain is specified, prints an ASCII table (ID, NAME).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appCtx, err := getAppContext()
 		if err != nil {

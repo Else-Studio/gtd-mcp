@@ -19,9 +19,14 @@
 Install the latest release directly to `~/.local/bin` using our install script:
 
 ```bash
+curl -fsSL https://gtd.elsestudio.dev/install.sh | bash
+```
+
+Fallback (same script from the repo):
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/Else-Studio/gtd-mcp/main/install.sh | bash
 ```
-*(A shorter branded URL `https://elsestudio.dev/gtd/install` will be available soon).*
 
 ### Windows (Manual)
 
@@ -142,6 +147,7 @@ Full entity CRUD:
 - `gtd project` — add, update, list, delete, restore  
 - `gtd area` — add, update, list, delete, restore  
 - `gtd people` — add, update, list, delete  
+- `gtd context list` · `gtd tag list` — distinct labels used on tasks  
 - `gtd init` · `gtd index rebuild` · `gtd mcp`
 
 Use `gtd <command> --help` for flags and examples.
@@ -166,6 +172,19 @@ Layout (created by `gtd init`):
 ```
 
 If you edit files by hand, run `gtd index rebuild` so queries stay in sync.
+
+#### Copying the workspace to another device
+
+Markdown under `tasks/`, `projects/`, `areas/`, and `people/` is the source of truth. `index.db` is a rebuildable cache.
+
+After copying the workspace (rsync, Unison, or manual copy of `~/.gtd` / `$GTD_DIR`) to a new machine:
+
+1. Install the `gtd` binary on that machine.
+2. Set `GTD_DIR` if the tree is not at the default `~/.gtd`.
+3. Run **`gtd init`** (idempotent: ensures directories and opens/creates the index schema).
+4. Run **`gtd index rebuild`** so queries are rebuilt from the markdown files on this device.
+
+Prefer excluding `index.db` and SQLite WAL sidecars (`index.db-wal`, `index.db-shm`) from sync and always rebuilding on the destination.
 
 ---
 

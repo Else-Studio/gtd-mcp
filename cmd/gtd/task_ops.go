@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,29 @@ import (
 	"gtd/internal/parser"
 	"gtd/internal/persistence/sqlite"
 )
+
+// parseLabeledList splits a comma-separated flag value into a normalized slice.
+// Empty raw (after trim) returns an empty slice (clear). Items are trimmed;
+// missing labelPrefix is prepended (e.g. "@" for contexts, "#" for tags).
+func parseLabeledList(raw, labelPrefix string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if labelPrefix != "" && !strings.HasPrefix(p, labelPrefix) {
+			p = labelPrefix + p
+		}
+		out = append(out, p)
+	}
+	return out
+}
 
 // CreateTaskOptions holds NLP text and optional flag overrides for task add.
 type CreateTaskOptions struct {
@@ -167,6 +191,8 @@ func (c *appContext) CreateTask(opts CreateTaskOptions) (*CreateTaskResult, erro
 
 // UpdateTaskOptions holds optional NLP text and flag-driven field updates.
 // optionalString fields: Set false = leave alone; Set true = apply Value (empty clears).
+// Contexts/Tags: Set true with empty Value clears the slice; non-empty replaces
+// the whole list (comma-separated values).
 type UpdateTaskOptions struct {
 	Text        string
 	Status      string // empty = no status flag
@@ -176,6 +202,8 @@ type UpdateTaskOptions struct {
 	AssignedTo  optionalString
 	StartOffset optionalString
 	Recurrence  optionalString
+	Contexts    optionalString
+	Tags        optionalString
 }
 
 // UpdateTaskResult is the updated task plus presentation side-data for the CLI.
@@ -367,6 +395,14 @@ func (c *appContext) UpdateTask(id string, opts UpdateTaskOptions) (*UpdateTaskR
 			}
 			task.Recurrence = &rule
 		}
+		task.UpdatedAt = time.Now()
+	}
+	if opts.Contexts.Set {
+		task.Contexts = parseLabeledList(opts.Contexts.Value, "@")
+		task.UpdatedAt = time.Now()
+	}
+	if opts.Tags.Set {
+		task.Tags = parseLabeledList(opts.Tags.Value, "#")
 		task.UpdatedAt = time.Now()
 	}
 

@@ -78,11 +78,18 @@ var taskUpdateCmd = &cobra.Command{
 If [text] is provided, it is parsed via NLP to update the task's title, project, area, contexts, tags, or dates.
 The --status flag can be used to explicitly change the status (e.g. 'next', 'done', 'waiting', 'someday').
 
+Clearable / replaceable multi-value fields:
+  --contexts  Comma-separated list (e.g. @phone,@office). Empty string clears all contexts.
+  --tags      Comma-separated list (e.g. #weekend). Empty string clears all tags.
+Flag present replaces the whole list; omit the flag to leave unchanged. NLP text is applied first; flags win when both are set.
+
 Special Behavior (Project Stall Telemetry):
 If updating a task status to 'done' or 'archived' leaves its associated project with zero active 'next' tasks, the JSON output will return 'project_stalled: true' alongside next-action candidates.
 
 Example:
-  gtd task update c1a67a07-... "+Work Migration /due:2026-07-20" --status next`,
+  gtd task update c1a67a07-... "+Work Migration /due:2026-07-20" --status next
+  gtd task update c1a67a07-... --contexts ""
+  gtd task update c1a67a07-... --contexts @computer,@phone`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
@@ -122,6 +129,14 @@ Example:
 		if cmd.Flags().Changed("recurrence") {
 			v, _ := cmd.Flags().GetString("recurrence")
 			opts.Recurrence = optionalString{Set: true, Value: v}
+		}
+		if cmd.Flags().Changed("contexts") {
+			v, _ := cmd.Flags().GetString("contexts")
+			opts.Contexts = optionalString{Set: true, Value: v}
+		}
+		if cmd.Flags().Changed("tags") {
+			v, _ := cmd.Flags().GetString("tags")
+			opts.Tags = optionalString{Set: true, Value: v}
 		}
 
 		result, err := appCtx.UpdateTask(id, opts)
@@ -365,6 +380,8 @@ func init() {
 	taskUpdateCmd.Flags().String("assigned-to", "", "Assigned To")
 	taskUpdateCmd.Flags().String("start-offset", "", "Relative start offset (JSON or \"-1 day\")")
 	taskUpdateCmd.Flags().String("recurrence", "", "Recurrence rule JSON (e.g. {\"rule\":\"daily\"})")
+	taskUpdateCmd.Flags().String("contexts", "", "Replace contexts (comma-separated); empty clears")
+	taskUpdateCmd.Flags().String("tags", "", "Replace tags (comma-separated); empty clears")
 
 	taskListCmd.Flags().String("area-id", "", "Filter by Area ID")
 	taskListCmd.Flags().String("area", "", "Filter by Area Name")

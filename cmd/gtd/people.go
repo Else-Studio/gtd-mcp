@@ -56,7 +56,8 @@ var peopleDeleteCmd = &cobra.Command{
 var peopleListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List people",
-	Long:  `Lists all active person IDs. Defaults to JSON list output.`,
+	Long: `Lists all active people (id and name).
+Defaults to JSON. When --plain is specified, prints an ASCII table (ID, NAME).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appCtx, err := getAppContext()
 		if err != nil {

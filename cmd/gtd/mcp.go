@@ -228,6 +228,8 @@ func registerTools(s *server.MCPServer) {
 		mcp.WithString("assigned_to", mcp.Description("Assignee name; empty string clears. "+clearableHelp)),
 		mcp.WithString("start_offset", mcp.Description("Relative start offset: JSON {\"amount\":-1,\"unit\":\"day\"} or \"-1 day\"; empty clears. "+clearableHelp)),
 		mcp.WithString("recurrence", mcp.Description("Recurrence JSON e.g. {\"rule\":\"daily\"}; empty clears. "+clearableHelp)),
+		mcp.WithString("contexts", mcp.Description("Replace contexts (comma-separated, e.g. @phone,@office); empty string clears all. "+clearableHelp)),
+		mcp.WithString("tags", mcp.Description("Replace tags (comma-separated, e.g. #weekend); empty string clears all. "+clearableHelp)),
 	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		m, err := asArgsMap(request)
 		if err != nil {
@@ -245,6 +247,8 @@ func registerTools(s *server.MCPServer) {
 		args = appendFlagIfPresent(args, m, "assigned_to", "--assigned-to")
 		args = appendFlagIfPresent(args, m, "start_offset", "--start-offset")
 		args = appendFlagIfPresent(args, m, "recurrence", "--recurrence")
+		args = appendFlagIfPresent(args, m, "contexts", "--contexts")
+		args = appendFlagIfPresent(args, m, "tags", "--tags")
 		return executeCLI(args...)
 	})
 

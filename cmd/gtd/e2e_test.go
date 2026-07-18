@@ -528,3 +528,106 @@ func TestE2E_SoftDelete_IndexSync(t *testing.T) {
 		}
 	}
 }
+
+// TestE2E_AreaPeoplePlainList verifies area/people list --plain render tables (not Go dumps).
+func TestE2E_AreaPeoplePlainList(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+	runCmdE2E(t, workspaceDir, "area", "add", "Work")
+	runCmdE2E(t, workspaceDir, "people", "add", "Alice")
+
+	for _, args := range [][]string{
+		{"area", "list", "--plain"},
+		{"people", "list", "--plain"},
+	} {
+		cmd := exec.Command(cliPath, args...)
+		cmd.Env = append(os.Environ(), "GTD_DIR="+workspaceDir)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v failed: %v, out: %s", args, err, output)
+		}
+		outStr := string(output)
+		if outStr[0] == '{' {
+			t.Errorf("%v: expected plain text, got JSON: %s", args, outStr)
+		}
+		if !strings.Contains(outStr, "NAME") {
+			t.Errorf("%v: expected NAME header, got: %s", args, outStr)
+		}
+	}
+	cmd := exec.Command(cliPath, "area", "list", "--plain")
+	cmd.Env = append(os.Environ(), "GTD_DIR="+workspaceDir)
+	output, _ := cmd.CombinedOutput()
+	if !strings.Contains(string(output), "Work") {
+		t.Errorf("expected area name Work in plain list, got: %s", output)
+	}
+	cmd = exec.Command(cliPath, "people", "list", "--plain")
+	cmd.Env = append(os.Environ(), "GTD_DIR="+workspaceDir)
+	output, _ = cmd.CombinedOutput()
+	if !strings.Contains(string(output), "Alice") {
+		t.Errorf("expected person Alice in plain list, got: %s", output)
+	}
+}
+
+// TestE2E_ContextTagListAndClear verifies context/tag list and clear/replace on update.
+func TestE2E_ContextTagListAndClear(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	taskResult := runCmdE2E(t, workspaceDir, "task", "add", "Call plumber @phone #home")
+	taskID := taskResult["data"].(map[string]interface{})["id"].(string)
+
+	ctxList := runCmdE2E(t, workspaceDir, "context", "list")
+	contexts, ok := ctxList["data"].([]interface{})
+	if !ok || len(contexts) == 0 {
+		t.Fatalf("expected contexts in list, got %#v", ctxList["data"])
+	}
+	foundPhone := false
+	for _, c := range contexts {
+		if s, _ := c.(string); s == "@phone" {
+			foundPhone = true
+		}
+	}
+	if !foundPhone {
+		t.Errorf("expected @phone in context list, got %v", contexts)
+	}
+
+	tagList := runCmdE2E(t, workspaceDir, "tag", "list")
+	tags, ok := tagList["data"].([]interface{})
+	if !ok || len(tags) == 0 {
+		t.Fatalf("expected tags in list, got %#v", tagList["data"])
+	}
+	foundHome := false
+	for _, tg := range tags {
+		if s, _ := tg.(string); s == "#home" {
+			foundHome = true
+		}
+	}
+	if !foundHome {
+		t.Errorf("expected #home in tag list, got %v", tags)
+	}
+
+	// Replace contexts
+	upd := runCmdE2E(t, workspaceDir, "task", "update", taskID, "--contexts", "@office,computer")
+	taskObj := upd["data"].(map[string]interface{})["task"].(map[string]interface{})
+	ctxs, _ := taskObj["contexts"].([]interface{})
+	if len(ctxs) != 2 {
+		t.Fatalf("expected 2 contexts after replace, got %v", ctxs)
+	}
+	got := map[string]bool{}
+	for _, c := range ctxs {
+		got[c.(string)] = true
+	}
+	if !got["@office"] || !got["@computer"] {
+		t.Errorf("expected @office and @computer, got %v", ctxs)
+	}
+
+	// Clear contexts and tags
+	cleared := runCmdE2E(t, workspaceDir, "task", "update", taskID, "--contexts", "", "--tags", "")
+	clearedTask := cleared["data"].(map[string]interface{})["task"].(map[string]interface{})
+	if c, ok := clearedTask["contexts"].([]interface{}); ok && len(c) > 0 {
+		t.Errorf("expected contexts cleared, got %v", c)
+	}
+	if tg, ok := clearedTask["tags"].([]interface{}); ok && len(tg) > 0 {
+		t.Errorf("expected tags cleared, got %v", tg)
+	}
+}

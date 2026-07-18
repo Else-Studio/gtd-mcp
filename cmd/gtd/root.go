@@ -232,13 +232,53 @@ func printPlainOutput(data interface{}) {
 		}
 		if len(tasks) > 0 {
 			printTaskTable(tasks)
-		} else {
-			fmt.Printf("%+v\n", v)
+			return
 		}
+		var areas []*domain.Area
+		for _, item := range v {
+			if a, ok := item.(*domain.Area); ok {
+				areas = append(areas, a)
+			}
+		}
+		if len(areas) > 0 {
+			printAreaTable(areas)
+			return
+		}
+		var people []*domain.Person
+		for _, item := range v {
+			if p, ok := item.(*domain.Person); ok {
+				people = append(people, p)
+			}
+		}
+		if len(people) > 0 {
+			printPeopleTable(people)
+			return
+		}
+		var strs []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				strs = append(strs, s)
+			}
+		}
+		if len(strs) == len(v) && len(v) > 0 {
+			printStringList(strs)
+			return
+		}
+		fmt.Printf("%+v\n", v)
 	case *domain.Project:
 		printProjectTable([]*domain.Project{v})
 	case []*domain.Project:
 		printProjectTable(v)
+	case *domain.Area:
+		printAreaTable([]*domain.Area{v})
+	case []*domain.Area:
+		printAreaTable(v)
+	case *domain.Person:
+		printPeopleTable([]*domain.Person{v})
+	case []*domain.Person:
+		printPeopleTable(v)
+	case []string:
+		printStringList(v)
 	default:
 		fmt.Printf("%+v\n", v)
 	}
@@ -275,6 +315,34 @@ func printProjectTable(projects []*domain.Project) {
 			areaStr = *p.AreaID
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", p.ID, p.Title, p.Status, areaStr)
+	}
+	w.Flush()
+}
+
+func printAreaTable(areas []*domain.Area) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tNAME")
+	for _, a := range areas {
+		fmt.Fprintf(w, "%s\t%s\n", a.ID, a.Name)
+	}
+	w.Flush()
+}
+
+func printPeopleTable(people []*domain.Person) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tNAME")
+	for _, p := range people {
+		fmt.Fprintf(w, "%s\t%s\n", p.ID, p.Name)
+	}
+	w.Flush()
+}
+
+// printStringList renders free-form catalog values (contexts, tags).
+func printStringList(items []string) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "VALUE")
+	for _, s := range items {
+		fmt.Fprintln(w, s)
 	}
 	w.Flush()
 }

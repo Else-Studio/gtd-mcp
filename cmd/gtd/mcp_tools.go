@@ -67,6 +67,19 @@ func registerExtraTools(s *server.MCPServer) {
 		return executeCLI("people", "list")
 	})
 
+	// --- Derived catalogs (free-form labels on tasks) ---
+	s.AddTool(mcp.NewTool("gtd_context_list",
+		mcp.WithDescription("List distinct contexts currently used on non-deleted tasks (e.g. @computer). Contexts are free-form, not first-class entities. "+coachInstruction),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return executeCLI("context", "list")
+	})
+
+	s.AddTool(mcp.NewTool("gtd_tag_list",
+		mcp.WithDescription("List distinct tags currently used on non-deleted tasks (e.g. #weekend). Tags are free-form, not first-class entities. "+coachInstruction),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return executeCLI("tag", "list")
+	})
+
 	s.AddTool(mcp.NewTool("gtd_people_add",
 		mcp.WithDescription("Add a Person used for waiting-for / delegation (%name). "+coachInstruction),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Person name")),
