@@ -51,7 +51,7 @@ func TestE2E_TaskProjectLifecycle(t *testing.T) {
 	}
 	// Note: project response format might just be the project directly or { "project": ... }
 	// We'll assume the project object is at the top level or inside "project"
-	
+
 	// Wait, formatOutputData passes the project as-is, so data is the project object.
 	_, ok = projData["id"].(string)
 	if !ok {
@@ -68,7 +68,7 @@ func TestE2E_TaskProjectLifecycle(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected task id to be string")
 	}
-	
+
 	warnings, ok := taskOutput["warnings"].([]interface{})
 	if !ok || len(warnings) == 0 {
 		t.Errorf("expected warnings array, got %v", taskOutput["warnings"])
@@ -104,7 +104,7 @@ func TestE2E_PlainOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected command to succeed, got error: %v, output: %s", err, output)
 	}
-	
+
 	outStr := string(output)
 	if outStr[0] == '{' {
 		t.Errorf("expected plain text output, got JSON-like: %s", outStr)
@@ -128,7 +128,7 @@ func TestE2E_ComprehensiveFlow(t *testing.T) {
 	runCmdE2E(t, workspaceDir, "task", "add", `Buy paint +"Home Renovation" @errand #weekend /next /due:2000-01-01`)
 	runCmdE2E(t, workspaceDir, "task", "add", `Read Go tutorials +"Learn Go" @computer /next`)
 	runCmdE2E(t, workspaceDir, "task", "add", "General inbox idea without tags")
-	
+
 	// Create a task to be deleted
 	toDeleteRes := runCmdE2E(t, workspaceDir, "task", "add", "Mistake task")
 	toDeleteID := toDeleteRes["data"].(map[string]interface{})["id"].(string)
@@ -481,7 +481,7 @@ func TestE2E_EmptyRepositoryList(t *testing.T) {
 
 	// Action: List tasks immediately when empty
 	result := runCmdE2E(t, workspaceDir, "task", "list")
-	
+
 	// Outcome: Assert data contains empty array []
 	data, ok := result["data"].([]interface{})
 	if !ok {
@@ -528,5 +528,3 @@ func TestE2E_SoftDelete_IndexSync(t *testing.T) {
 		}
 	}
 }
-
-

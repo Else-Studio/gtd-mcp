@@ -37,9 +37,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "gtd",
-	Short:         "AI-First GTD CLI",
-	Version:       Version,
+	Use:     "gtd",
+	Short:   "AI-First GTD CLI",
+	Version: Version,
 	Long: `The AI-First GTD CLI is a command-line interface designed to implement the David Allen Getting Things Done (GTD) framework.
 It is built primarily for integration with AI Agents (e.g. MCP Servers) but supports human-readable outputs.
 
@@ -136,8 +136,8 @@ func init() {
 
 type TaskOutput struct {
 	*domain.Task
-	Warnings              []string `json:"warnings,omitempty"`
-	InvalidDateCommands   []string `json:"invalidDateCommands,omitempty"`
+	Warnings            []string `json:"warnings,omitempty"`
+	InvalidDateCommands []string `json:"invalidDateCommands,omitempty"`
 }
 
 func formatOutputData(data interface{}) interface{} {
@@ -260,7 +260,7 @@ func printTaskTable(tasks []*domain.Task) {
 		if warnings == "" {
 			warnings = "-"
 		}
-		
+
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", t.ID, t.Title, t.Status, dueStr, projStr, warnings)
 	}
 	w.Flush()
@@ -302,7 +302,7 @@ func printError(err error) {
 		fmt.Fprintln(os.Stderr, "Error:", err.Error())
 		return
 	}
-	
+
 	code := "ERR_UNKNOWN"
 	errStr := err.Error()
 	if errors.Is(err, domain.ErrNotFound) {

@@ -1,12 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"time"
-
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"gtd/internal/domain"
 )
 
 var peopleCmd = &cobra.Command{
@@ -19,25 +14,19 @@ People are used to track 'waiting' tasks.`,
 var peopleAddCmd = &cobra.Command{
 	Use:   "add <name>",
 	Short: "Add a new person",
-	Long: `Adds a new person to the workspace with the specified name. Returns the JSON person representation.`,
+	Long:  `Adds a new person to the workspace with the specified name. Returns the JSON person representation.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		person := &domain.Person{
-			ID:   uuid.New().String(),
-			Name: name,
+		person, err := appCtx.CreatePerson(args[0])
+		if err != nil {
+			return err
 		}
-
-		if err := appCtx.PersistPerson(person); err != nil {
-			return fmt.Errorf("persist person: %w", err)
-		}
-
 		printSuccess(person)
 		return nil
 	},
@@ -46,28 +35,19 @@ var peopleAddCmd = &cobra.Command{
 var peopleDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a person",
-	Long: `Soft-deletes a person by ID.`,
+	Long:  `Soft-deletes a person by ID.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		person, err := appCtx.personRepo.Get(id)
+		person, err := appCtx.DeletePerson(args[0])
 		if err != nil {
-			return fmt.Errorf("person not found: %w", err)
+			return err
 		}
-
-		now := time.Now()
-		person.SoftDelete(now)
-
-		if err := appCtx.PersistPerson(person); err != nil {
-			return fmt.Errorf("persist person: %w", err)
-		}
-
 		printSuccess(person)
 		return nil
 	},
@@ -76,7 +56,7 @@ var peopleDeleteCmd = &cobra.Command{
 var peopleListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List people",
-	Long: `Lists all active person IDs. Defaults to JSON list output.`,
+	Long:  `Lists all active person IDs. Defaults to JSON list output.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		appCtx, err := getAppContext()
 		if err != nil {
@@ -84,18 +64,10 @@ var peopleListCmd = &cobra.Command{
 		}
 		defer appCtx.cleanup()
 
-		people, err := appCtx.personRepo.List()
+		activePeople, err := appCtx.ListActivePeople()
 		if err != nil {
-			return fmt.Errorf("list people: %w", err)
+			return err
 		}
-
-		activePeople := make([]*domain.Person, 0)
-		for _, p := range people {
-			if p.DeletedAt == nil {
-				activePeople = append(activePeople, p)
-			}
-		}
-
 		printSuccess(activePeople)
 		return nil
 	},
@@ -104,31 +76,20 @@ var peopleListCmd = &cobra.Command{
 var peopleUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update a person",
-	Long: `Updates a person's name by ID. Use --name to change their name.`,
+	Long:  `Updates a person's name by ID. Use --name to change their name.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		person, err := appCtx.personRepo.Get(id)
-		if err != nil {
-			return fmt.Errorf("person not found: %w", err)
-		}
-
 		name, _ := cmd.Flags().GetString("name")
-		if name != "" {
-			person.Name = name
-			person.UpdatedAt = time.Now()
+		person, err := appCtx.UpdatePerson(args[0], UpdatePersonOptions{Name: name})
+		if err != nil {
+			return err
 		}
-
-		if err := appCtx.PersistPerson(person); err != nil {
-			return fmt.Errorf("persist person: %w", err)
-		}
-
 		printSuccess(person)
 		return nil
 	},

@@ -41,10 +41,10 @@ Run this command at the start of a session or during a Weekly Review to ensure d
 		personRepo := fs.NewPersonRepository(filepath.Join(gtdDir, "people"))
 
 		syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, personRepo)
-		
+
 		ctx := context.Background()
 		now := time.Now()
-		
+
 		if err := syncEngine.Sync(ctx, now); err != nil {
 			return fmt.Errorf("failed to sync index: %w", err)
 		}

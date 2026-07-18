@@ -44,7 +44,7 @@ task list next (--area, --area-id, --project, --project-id, --context,
 		}
 		defer appCtx.cleanup()
 
-		filter := buildTaskQueryFilter(cmd, appCtx)
+		filter := appCtx.resolveTaskListFilter(taskListFilterFromCmd(cmd))
 		ids, err := appCtx.taskQuery.ListNextTasks(context.Background(), filter)
 		if err != nil {
 			return fmt.Errorf("list next: %w", err)
@@ -93,7 +93,7 @@ archived tasks are excluded. Default returns a JSON list of task IDs. Supports
 		}
 		defer appCtx.cleanup()
 
-		filter := buildTaskQueryFilter(cmd, appCtx)
+		filter := appCtx.resolveTaskListFilter(taskListFilterFromCmd(cmd))
 		ids, err := appCtx.taskQuery.ListAgendaTasks(context.Background(), time.Now(), filter)
 		if err != nil {
 			return fmt.Errorf("list agenda: %w", err)

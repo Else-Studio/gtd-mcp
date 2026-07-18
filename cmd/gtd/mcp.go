@@ -89,14 +89,14 @@ func registerPrompts(s *server.MCPServer) {
 // buildStateJSON returns compact health counts by invoking CLI list shortcuts.
 func buildStateJSON() string {
 	type state struct {
-		InboxCount           int      `json:"inbox_count"`
-		NextCount            int      `json:"next_count"`
-		AgendaCount          int      `json:"agenda_count"`
-		StalledProjectCount  int      `json:"stalled_project_count"`
-		WaitingCount         int      `json:"waiting_count"`
-		SomedayCount         int      `json:"someday_count"`
-		WorkspaceOK          bool     `json:"workspace_ok"`
-		Errors               []string `json:"errors"`
+		InboxCount          int      `json:"inbox_count"`
+		NextCount           int      `json:"next_count"`
+		AgendaCount         int      `json:"agenda_count"`
+		StalledProjectCount int      `json:"stalled_project_count"`
+		WaitingCount        int      `json:"waiting_count"`
+		SomedayCount        int      `json:"someday_count"`
+		WorkspaceOK         bool     `json:"workspace_ok"`
+		Errors              []string `json:"errors"`
 	}
 	out := state{WorkspaceOK: true, Errors: []string{}}
 

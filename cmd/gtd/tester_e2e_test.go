@@ -249,7 +249,7 @@ func TestE2E_Tester_DailyCaptureAndInbox(t *testing.T) {
 	// Verify they are in the inbox if they don't have statuses
 	inboxRes := runCmdJSON(t, wsDir, "inbox")
 	inboxData := toSlice(inboxRes["data"])
-	
+
 	hasT1, hasT3 := false, false
 	for _, item := range inboxData {
 		m := item.(map[string]interface{})
@@ -407,7 +407,7 @@ func TestE2E_Tester_RecurringTaskFollowUps(t *testing.T) {
 	// 3. Verify a new task has been generated (strictly assert)
 	listRes := runCmdJSON(t, wsDir, "task", "list")
 	listData := toSlice(listRes["data"])
-	
+
 	foundNewOccurrence := false
 	for _, item := range listData {
 		m := item.(map[string]interface{})
@@ -607,7 +607,7 @@ func TestE2E_Tester_Exploration2_KitchenRemodel(t *testing.T) {
 	// 4. Query agenda with Area filter (strictly expected to succeed)
 	agendaFilterOutput := runCmdJSON(t, wsDir, "agenda", "--area-id", areaID)
 	data := toSlice(agendaFilterOutput["data"])
-	
+
 	// Task B should be returned, Task A (someday) is excluded.
 	foundB := false
 	for _, item := range data {
@@ -812,7 +812,7 @@ func TestE2E_Tester_Exploration5_ScaleWeightClamping(t *testing.T) {
 	// 3. Verify next occurrence clamps to Feb 28th (strictly assert)
 	listRes := runCmdJSON(t, wsDir, "task", "list")
 	listData := toSlice(listRes["data"])
-	
+
 	var febTaskID string
 	for _, item := range listData {
 		m := item.(map[string]interface{})
@@ -835,7 +835,7 @@ func TestE2E_Tester_Exploration5_ScaleWeightClamping(t *testing.T) {
 	// 5. Verify March task restores to 31st (strictly assert)
 	listRes2 := runCmdJSON(t, wsDir, "task", "list")
 	listData2 := toSlice(listRes2["data"])
-	
+
 	var marTaskID string
 	for _, item := range listData2 {
 		m := item.(map[string]interface{})
@@ -1007,7 +1007,7 @@ func TestE2E_Tester_Exploration8_AreaCascade(t *testing.T) {
 	// 3. Create Tasks
 	t1Res := runCmdJSON(t, wsDir, "task", "add", `Read Rust book +"Learn Rust" /next`)
 	t1ID := t1Res["data"].(map[string]interface{})["id"].(string)
-	
+
 	t2Res := runCmdJSON(t, wsDir, "task", "add", "Register for course !Education /next")
 	t2ID := t2Res["data"].(map[string]interface{})["id"].(string)
 
@@ -1155,7 +1155,6 @@ func TestE2E_Tester_Exploration10_TaskPromotion(t *testing.T) {
 	}
 }
 
-
 // TestE2E_Tester_Exploration12_QuotedOverrides stress-tests quoted overrides and escapes.
 func TestE2E_Tester_Exploration12_QuotedOverrides(t *testing.T) {
 	wsDir := t.TempDir()
@@ -1202,7 +1201,7 @@ func TestE2E_Tester_Exploration13_TimedDueDates(t *testing.T) {
 
 	updateBRes := runCmdJSON(t, wsDir, "task", "update", taskBID, "--start-offset", "-30 minute")
 	updateBTask := updateBRes["data"].(map[string]interface{})["task"].(map[string]interface{})
-	
+
 	start, _ := updateBTask["startTime"].(string)
 	if !timeMatchesDate(start, "2026-07-20") { // date component
 		t.Errorf("expected startTime to be on 2026-07-20, got %s", start)
@@ -1238,8 +1237,6 @@ func TestE2E_Tester_Exploration14_ArchivedProjectTaskRestriction(t *testing.T) {
 		t.Errorf("expected task update under archived project container to fail validation, got output: %s", taskUpdateOutput)
 	}
 }
-
-
 
 // TestE2E_Tester_AdHocFilters verifies task list and agenda queries with context, project, area, and people filtering.
 func TestE2E_Tester_AdHocFilters(t *testing.T) {

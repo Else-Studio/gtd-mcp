@@ -1,12 +1,7 @@
 package main
 
 import (
-	"fmt"
-	"time"
-
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"gtd/internal/domain"
 )
 
 var projectCmd = &cobra.Command{
@@ -21,127 +16,56 @@ var projectAddCmd = &cobra.Command{
 	Short: "Add a new project",
 	Long: `Creates a new active project with the specified title.
 The project is initialized in the 'active' status. Returns the JSON project representation.`,
-	Args:  cobra.ExactArgs(1),
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		title := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		project := &domain.Project{
-			ID:     uuid.New().String(),
-			Title:  title,
-			Status: domain.ProjectStatusActive,
+		opts := CreateProjectOptions{Title: args[0]}
+		opts.AreaID, _ = cmd.Flags().GetString("area-id")
+		opts.AreaName, _ = cmd.Flags().GetString("area")
+
+		project, err := appCtx.CreateProject(opts)
+		if err != nil {
+			return err
 		}
-
-		areaID, _ := cmd.Flags().GetString("area-id")
-		areaName, _ := cmd.Flags().GetString("area")
-
-		if areaName != "" && areaID == "" {
-			// Find or create area
-			now := time.Now()
-			areas, _ := appCtx.areaRepo.List()
-			var found *domain.Area
-			for _, a := range areas {
-				if a.Name == areaName && a.DeletedAt == nil {
-					found = a
-					break
-				}
-			}
-			if found == nil {
-				found = &domain.Area{
-					ID:        uuid.New().String(),
-					Name:      areaName,
-					CreatedAt: now,
-					UpdatedAt: now,
-				}
-				if err := appCtx.PersistArea(found); err != nil {
-					return fmt.Errorf("persist new area: %w", err)
-				}
-			}
-			areaID = found.ID
-		}
-
-		if areaID != "" {
-			project.AreaID = &areaID
-		}
-
-		if err := appCtx.PersistProject(project); err != nil {
-			return fmt.Errorf("persist project: %w", err)
-		}
-
 		printSuccess(project)
 		return nil
 	},
 }
-
 
 var projectUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update a project",
 	Long: `Updates project metadata by ID.
 The --status flag allows changing the status of the project (e.g. active, someday, completed, archived).`,
-	Args:  cobra.ExactArgs(1),
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		project, err := appCtx.projectRepo.Get(id)
-		if err != nil {
-			return fmt.Errorf("project not found: %w", err)
-		}
-
-		status, _ := cmd.Flags().GetString("status")
-		if status != "" {
-			project.UpdateStatus(domain.ProjectStatus(status), time.Now())
-		}
-
+		opts := UpdateProjectOptions{}
+		opts.Status, _ = cmd.Flags().GetString("status")
 		areaID, _ := cmd.Flags().GetString("area-id")
-		areaName, _ := cmd.Flags().GetString("area")
-
-		if areaName != "" && areaID == "" {
-			now := time.Now()
-			areas, _ := appCtx.areaRepo.List()
-			var found *domain.Area
-			for _, a := range areas {
-				if a.Name == areaName && a.DeletedAt == nil {
-					found = a
-					break
-				}
-			}
-			if found == nil {
-				found = &domain.Area{
-					ID:        uuid.New().String(),
-					Name:      areaName,
-					CreatedAt: now,
-					UpdatedAt: now,
-				}
-				if err := appCtx.PersistArea(found); err != nil {
-					return fmt.Errorf("persist new area: %w", err)
-				}
-			}
-			areaID = found.ID
+		opts.AreaName, _ = cmd.Flags().GetString("area")
+		// Mirror prior CLI: Changed("area-id") || areaID != "" after name resolve.
+		// areaID from the flag is usually only non-empty when Changed; AreaName
+		// resolution happens inside UpdateProject.
+		if cmd.Flags().Changed("area-id") {
+			opts.AreaID = optionalString{Set: true, Value: areaID}
+			opts.AreaFlagUsed = true
 		}
 
-		if cmd.Flags().Changed("area-id") || areaID != "" {
-			if areaID == "" {
-				project.AreaID = nil
-			} else {
-				project.AreaID = &areaID
-			}
-			project.UpdatedAt = time.Now()
+		project, err := appCtx.UpdateProject(args[0], opts)
+		if err != nil {
+			return err
 		}
-
-		if err := appCtx.PersistProject(project); err != nil {
-			return fmt.Errorf("persist project: %w", err)
-		}
-
 		printSuccess(project)
 		return nil
 	},
@@ -152,41 +76,18 @@ var projectDeleteCmd = &cobra.Command{
 	Short: "Delete a project",
 	Long: `Soft-deletes a project by ID.
 Soft-deleted projects are hidden from normal list views.`,
-	Args:  cobra.ExactArgs(1),
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		project, err := appCtx.projectRepo.Get(id)
+		project, err := appCtx.DeleteProject(args[0])
 		if err != nil {
-			return fmt.Errorf("project not found: %w", err)
+			return err
 		}
-
-		tasks, err := appCtx.taskRepo.List()
-		if err != nil {
-			return fmt.Errorf("list tasks: %w", err)
-		}
-
-		now := time.Now()
-		project.SoftDelete(now, tasks)
-
-		if err := appCtx.PersistProject(project); err != nil {
-			return fmt.Errorf("persist project: %w", err)
-		}
-
-		// Persist cascade soft-deletes on child tasks.
-		for _, t := range tasks {
-			if t.ProjectID != nil && *t.ProjectID == project.ID {
-				if err := appCtx.PersistTask(t, now); err != nil {
-					return fmt.Errorf("persist cascaded task: %w", err)
-				}
-			}
-		}
-
 		printSuccess(project)
 		return nil
 	},
@@ -195,53 +96,22 @@ Soft-deleted projects are hidden from normal list views.`,
 var projectRestoreCmd = &cobra.Command{
 	Use:   "restore <id>",
 	Short: "Restore a project",
-	Long: `Restores a soft-deleted project by ID, and cascades the restoration to child tasks.`,
+	Long:  `Restores a soft-deleted project by ID, and cascades the restoration to child tasks.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		id := args[0]
 		appCtx, err := getAppContext()
 		if err != nil {
 			return err
 		}
 		defer appCtx.cleanup()
 
-		project, err := appCtx.projectRepo.Get(id)
+		project, err := appCtx.RestoreProject(args[0])
 		if err != nil {
-			return fmt.Errorf("project not found: %w", err)
-		}
-
-		tasks, err := appCtx.taskRepo.List()
-		if err != nil {
-			return fmt.Errorf("list tasks: %w", err)
-		}
-
-		now := time.Now()
-		if err := restoreProjectWithCascade(appCtx, project, tasks, now); err != nil {
 			return err
 		}
-
 		printSuccess(project)
 		return nil
 	},
-}
-
-// restoreProjectWithCascade restores a project and persists every child task
-// that belongs to it. Fail-closed: any Persist* error aborts the cascade.
-func restoreProjectWithCascade(appCtx *appContext, project *domain.Project, tasks []*domain.Task, now time.Time) error {
-	project.Restore(now, tasks)
-
-	if err := appCtx.PersistProject(project); err != nil {
-		return fmt.Errorf("persist project: %w", err)
-	}
-
-	for _, t := range tasks {
-		if t.ProjectID != nil && *t.ProjectID == project.ID {
-			if err := appCtx.PersistTask(t, now); err != nil {
-				return fmt.Errorf("persist cascaded task: %w", err)
-			}
-		}
-	}
-	return nil
 }
 
 var projectListCmd = &cobra.Command{
@@ -256,19 +126,10 @@ Returns a JSON list of IDs. When --plain is specified, fetches and outputs a det
 		}
 		defer appCtx.cleanup()
 
-		// For stage 7, listing files via fs repo is simplest and sufficient if we don't have sqlite list method.
-		projects, err := appCtx.projectRepo.List()
+		ids, err := appCtx.ListActiveProjectIDs()
 		if err != nil {
-			return fmt.Errorf("list projects: %w", err)
+			return err
 		}
-
-		ids := []string{}
-		for _, p := range projects {
-			if p.DeletedAt == nil {
-				ids = append(ids, p.ID)
-			}
-		}
-
 		printSuccess(resolveProjects(appCtx, ids))
 		return nil
 	},

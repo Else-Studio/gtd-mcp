@@ -35,10 +35,10 @@ func TestMain(m *testing.M) {
 
 func TestCLI_Init(t *testing.T) {
 	workspaceDir := t.TempDir()
-	
+
 	cmd := exec.Command(cliPath, "init")
 	cmd.Env = append(os.Environ(), "GTD_DIR="+workspaceDir)
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("expected init to succeed, got error: %v, output: %s", err, output)
@@ -80,7 +80,7 @@ func TestCLI_Init(t *testing.T) {
 func TestCLI_ErrorFormatting(t *testing.T) {
 	cmd := exec.Command(cliPath, "unknown-command")
 	output, err := cmd.CombinedOutput()
-	
+
 	if err == nil {
 		t.Fatal("expected unknown-command to fail with an exit code")
 	}
@@ -137,7 +137,7 @@ func TestCLI_TaskAddAndList(t *testing.T) {
 	var resultList map[string]interface{}
 	json.Unmarshal(outputList, &resultList)
 	listData := resultList["data"].([]interface{})
-	
+
 	found := false
 	for _, item := range listData {
 		obj := item.(map[string]interface{})
@@ -161,7 +161,7 @@ func TestCLI_TaskStructuredError(t *testing.T) {
 	cmd := exec.Command(cliPath, "task", "update", "non-existent-uuid", "--status", "done")
 	cmd.Env = env
 	output, err := cmd.CombinedOutput()
-	
+
 	if err == nil {
 		t.Fatal("expected task update to fail")
 	}
@@ -191,7 +191,7 @@ func TestCLI_TaskProjectStall(t *testing.T) {
 	initCmd.Run()
 
 	projectID := "test-project-123"
-	
+
 	os.MkdirAll(filepath.Join(workspaceDir, "projects"), 0755)
 	projRepo := fs.NewProjectRepository(filepath.Join(workspaceDir, "projects"))
 	projRepo.Save(&domain.Project{
@@ -199,7 +199,7 @@ func TestCLI_TaskProjectStall(t *testing.T) {
 		Title:  "Test Project",
 		Status: domain.ProjectStatusActive,
 	})
-	
+
 	indexCmd := exec.Command(cliPath, "index", "rebuild")
 	indexCmd.Env = env
 	if out, err := indexCmd.CombinedOutput(); err != nil {
@@ -243,7 +243,7 @@ func TestCLI_TaskProjectStall(t *testing.T) {
 	outUp1, _ := cmdUpdate1.CombinedOutput()
 	var resUp1 map[string]interface{}
 	json.Unmarshal(outUp1, &resUp1)
-	
+
 	data1 := resUp1["data"].(map[string]interface{})
 	if stalled, ok := data1["project_stalled"].(bool); ok && stalled {
 		t.Fatal("expected project not to be stalled yet")
@@ -295,7 +295,7 @@ func TestCLI_ProjectLifecycle(t *testing.T) {
 	var resList map[string]interface{}
 	json.Unmarshal(outList, &resList)
 	listData := resList["data"].([]interface{})
-	
+
 	found := false
 	for _, item := range listData {
 		obj := item.(map[string]interface{})
@@ -318,11 +318,11 @@ func TestCLI_ProjectLifecycle(t *testing.T) {
 	cmdList2 := exec.Command(cliPath, "project", "list")
 	cmdList2.Env = env
 	outList2, _ := cmdList2.CombinedOutput()
-	
+
 	var resList2 map[string]interface{}
 	json.Unmarshal(outList2, &resList2)
 	listData2 := resList2["data"].([]interface{})
-	
+
 	for _, item := range listData2 {
 		obj := item.(map[string]interface{})
 		if obj["id"].(string) == projectID {
@@ -340,7 +340,7 @@ func TestCLI_Shortcuts(t *testing.T) {
 	initCmd.Run()
 
 	projectID := "test-stalled-project"
-	
+
 	os.MkdirAll(filepath.Join(workspaceDir, "projects"), 0755)
 	projRepo := fs.NewProjectRepository(filepath.Join(workspaceDir, "projects"))
 	projRepo.Save(&domain.Project{
@@ -348,7 +348,7 @@ func TestCLI_Shortcuts(t *testing.T) {
 		Title:  "Stalled Project",
 		Status: domain.ProjectStatusActive,
 	})
-	
+
 	indexCmd := exec.Command(cliPath, "index", "rebuild")
 	indexCmd.Env = env
 	if out, err := indexCmd.CombinedOutput(); err != nil {
@@ -365,7 +365,7 @@ func TestCLI_Shortcuts(t *testing.T) {
 	var resStalled map[string]interface{}
 	json.Unmarshal(outStalled, &resStalled)
 	stalledData := resStalled["data"].([]interface{})
-	
+
 	foundStalled := false
 	for _, item := range stalledData {
 		obj := item.(map[string]interface{})

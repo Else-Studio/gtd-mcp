@@ -51,7 +51,7 @@ func TestCascadeRestore_PropagatesSaveError(t *testing.T) {
 		UpdatedAt: now,
 	}
 
-	err = restoreProjectWithCascade(appCtx, project, []*domain.Task{child}, now)
+	err = appCtx.restoreProjectWithCascade(project, []*domain.Task{child}, now)
 	if err == nil {
 		t.Fatal("expected restore cascade to fail when task Save fails")
 	}
