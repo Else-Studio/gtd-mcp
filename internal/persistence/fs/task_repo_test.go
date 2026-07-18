@@ -1,6 +1,7 @@
 package fs
 
 import (
+	"errors"
 	"gtd/internal/domain"
 	"os"
 	"path/filepath"
@@ -169,5 +170,50 @@ Title`)
 
 	if len(tasks) != 1 || tasks[0].ID != "valid-1" {
 		t.Errorf("Expected 1 valid task to be returned, got %d", len(tasks))
+	}
+}
+
+func TestGenericRepo_Get_NotFound(t *testing.T) {
+	// Setup: Point repo to an empty TempDir.
+	dir := t.TempDir()
+	repo := NewTaskRepository(dir)
+
+	// Action: Call Get("nonexistent-id").
+	_, err := repo.Get("nonexistent-id")
+
+	// Outcome: Assert returned error unwraps to domain.ErrNotFound.
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestMarkdownCodec_ValidationEnforcement(t *testing.T) {
+	// Setup: Initialize a TaskRepository. Create an invalid Task (missing Title).
+	dir := t.TempDir()
+	repo := NewTaskRepository(dir)
+	invalidTask := &domain.Task{
+		ID:     "task-invalid",
+		Title:  "", // Title cannot be empty
+		Status: domain.TaskStatusNext,
+	}
+
+	// Action: Call Save(invalidTask).
+	err := repo.Save(invalidTask)
+
+	// Outcome: Assert Save returns an error that wraps domain.ErrValidation.
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, domain.ErrValidation) {
+		t.Errorf("expected ErrValidation error, got %v", err)
+	}
+
+	// Assert no file was actually written to the directory.
+	path := filepath.Join(dir, "tasks", "task-invalid.md")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected file %s to not exist, but it does", path)
 	}
 }

@@ -217,3 +217,97 @@ func TestTaskRelativeStartTimeBounds(t *testing.T) {
 		t.Errorf("expected RelativeStartOffset to be nil for out of bounds negative offset")
 	}
 }
+
+func TestTaskStatusTransitions(t *testing.T) {
+	// Setup: Create a task in TaskStatusDone with a CompletedAt timestamp.
+	now := time.Now().Truncate(time.Second)
+	task := &Task{
+		ID:          "task1",
+		Status:      TaskStatusDone,
+		CompletedAt: &now,
+	}
+
+	// Action: Update status to TaskStatusNext
+	task.UpdateStatus(TaskStatusNext, now.Add(time.Second))
+	// Outcome: Assert CompletedAt is cleared when moved to Next.
+	if task.Status != TaskStatusNext {
+		t.Errorf("expected status next, got %s", task.Status)
+	}
+	if task.CompletedAt != nil {
+		t.Errorf("expected CompletedAt to be nil when reverted from done")
+	}
+
+	// Action: Update status to TaskStatusArchived
+	archivedTime := now.Add(2 * time.Second)
+	task.UpdateStatus(TaskStatusArchived, archivedTime)
+	// Outcome: Assert CompletedAt is populated when Archived.
+	if task.Status != TaskStatusArchived {
+		t.Errorf("expected status archived, got %s", task.Status)
+	}
+	if task.CompletedAt == nil || !task.CompletedAt.Equal(archivedTime) {
+		t.Errorf("expected CompletedAt to be %v, got %v", archivedTime, task.CompletedAt)
+	}
+}
+
+func TestTaskSoftDeleteAndRestore(t *testing.T) {
+	// Setup: Create an independent task.
+	task := &Task{ID: "task1"}
+	now := time.Now().Truncate(time.Second)
+
+	// Action: Call SoftDelete(now)
+	task.SoftDelete(now)
+	// Outcome: Assert DeletedAt matches 'now' after SoftDelete.
+	if task.DeletedAt == nil || !task.DeletedAt.Equal(now) {
+		t.Errorf("expected DeletedAt to be %v, got %v", now, task.DeletedAt)
+	}
+	if !task.UpdatedAt.Equal(now) {
+		t.Errorf("expected UpdatedAt to be %v, got %v", now, task.UpdatedAt)
+	}
+
+	// Action: Call Restore(now)
+	restoreTime := now.Add(time.Second)
+	task.Restore(restoreTime)
+	// Outcome: Assert DeletedAt is nil after Restore, and UpdatedAt changes.
+	if task.DeletedAt != nil {
+		t.Errorf("expected DeletedAt to be nil after restore")
+	}
+	if !task.UpdatedAt.Equal(restoreTime) {
+		t.Errorf("expected UpdatedAt to be %v, got %v", restoreTime, task.UpdatedAt)
+	}
+}
+
+func TestTaskSetProjectAndAreaNil(t *testing.T) {
+	// Setup: Create a task.
+	task := &Task{ID: "task1"}
+
+	// Action: Call SetProject(nil) and SetArea(nil)
+	task.SetProject(nil)
+	task.SetArea(nil)
+
+	// Outcome: Assert IDs remain nil.
+	if task.ProjectID != nil {
+		t.Errorf("expected ProjectID to remain nil")
+	}
+	if task.AreaID != nil {
+		t.Errorf("expected AreaID to remain nil")
+	}
+}
+
+func TestTaskUpdateDueDate_EdgeCases(t *testing.T) {
+	// Setup: Create a task with a DueDate and a RelativeStartOffset.
+	due := time.Date(2026, 3, 12, 0, 0, 0, 0, time.UTC)
+	task := &Task{
+		ID:      "t1",
+		DueDate: &due,
+	}
+	offset := &RelativeOffset{Amount: -2, Unit: "day"}
+	task.UpdateRelativeStartOffset(offset)
+
+	// Action: UpdateDueDate(nil)
+	task.UpdateDueDate(nil)
+
+	// Outcome: Assert RelativeStartOffset is set to nil.
+	if task.RelativeStartOffset != nil {
+		t.Errorf("expected RelativeStartOffset to be nil after setting DueDate to nil")
+	}
+}

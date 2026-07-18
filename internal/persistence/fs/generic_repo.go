@@ -20,6 +20,7 @@ type GenericRepo[T any] struct {
 	rootDir string
 	subDir  string
 	codec   MarkdownCodec[T]
+	clock   func() time.Time
 }
 
 func NewGenericRepo[T any](rootDir, subDir string, codec MarkdownCodec[T]) *GenericRepo[T] {
@@ -27,7 +28,15 @@ func NewGenericRepo[T any](rootDir, subDir string, codec MarkdownCodec[T]) *Gene
 		rootDir: rootDir,
 		subDir:  subDir,
 		codec:   codec,
+		clock:   time.Now,
 	}
+}
+
+func (r *GenericRepo[T]) now() time.Time {
+	if r.clock != nil {
+		return r.clock()
+	}
+	return time.Now()
 }
 
 func (r *GenericRepo[T]) dir() string {
@@ -35,7 +44,7 @@ func (r *GenericRepo[T]) dir() string {
 }
 
 func (r *GenericRepo[T]) Save(entity T, id string) error {
-	now := time.Now()
+	now := r.now()
 	frontmatter, title, desc, err := r.codec.Encode(entity, now)
 	if err != nil {
 		return err
@@ -68,7 +77,7 @@ func (r *GenericRepo[T]) Get(id string) (T, error) {
 		return zero, err
 	}
 
-	now := time.Now()
+	now := r.now()
 	return r.codec.Decode(id, title, desc, frontmatter, now)
 }
 

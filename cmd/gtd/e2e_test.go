@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gtd/internal/persistence/fs"
 
@@ -399,6 +400,132 @@ func TestE2E_AutoCreateProjectAndArea(t *testing.T) {
 	}
 	if !foundArea {
 		t.Errorf("expected new area to be found in area list")
+	}
+}
+
+func runCmdE2EFail(t *testing.T, workspaceDir string, args ...string) map[string]interface{} {
+	t.Helper()
+	cmd := exec.Command(cliPath, args...)
+	cmd.Env = append(os.Environ(), "GTD_DIR="+workspaceDir)
+
+	output, _ := cmd.CombinedOutput()
+	var result map[string]interface{}
+	if err := json.Unmarshal(output, &result); err != nil {
+		t.Fatalf("expected valid JSON for failed command %v, got error: %v, output: %s", args, err, output)
+	}
+	return result
+}
+
+func TestE2E_RecurrenceWorkflow(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	// Setup: Create a recurring task due today
+	today := time.Now().Format("2006-01-02")
+	addResult := runCmdE2E(t, workspaceDir, "task", "add", "Recurring task /due:"+today+" /recur:daily")
+	taskData := addResult["data"].(map[string]interface{})
+	taskID := taskData["id"].(string)
+
+	// Action: Complete the task
+	runCmdE2E(t, workspaceDir, "task", "update", taskID, "--status", "done")
+
+	// Outcome: A new task should be created (spawned) in index and fs.
+	// Since daily recurrence creates a new task due tomorrow, we should find it in task list.
+	listResult := runCmdE2E(t, workspaceDir, "task", "list")
+	listData := listResult["data"].([]interface{})
+
+	foundNewTask := false
+	for _, item := range listData {
+		obj := item.(map[string]interface{})
+		if obj["id"].(string) != taskID && strings.Contains(obj["title"].(string), "Recurring task") {
+			foundNewTask = true
+			dueStr, ok := obj["dueDate"].(string)
+			if !ok || dueStr == "" {
+				t.Errorf("expected spawned task to have a dueDate")
+			} else {
+				tomorrow := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+				if !strings.HasPrefix(dueStr, tomorrow) {
+					t.Errorf("expected spawned task due date to start with %s, got %s", tomorrow, dueStr)
+				}
+			}
+		}
+	}
+	if !foundNewTask {
+		t.Errorf("expected a new recurring task to be spawned")
+	}
+}
+
+func TestE2E_JSONValidation_MissingArgs(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	// Action: Run 'gtd task add' with no args. It should fail validation.
+	result := runCmdE2EFail(t, workspaceDir, "task", "add")
+
+	// Outcome: JSON error response
+	if success, ok := result["success"].(bool); ok && success {
+		t.Errorf("expected success: false for missing title")
+	}
+	errObj, ok := result["error"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected error object, got %v", result)
+	}
+	if code, _ := errObj["code"].(string); code != "ERR_VALIDATION" {
+		t.Errorf("expected error code ERR_VALIDATION, got %q", code)
+	}
+}
+
+func TestE2E_EmptyRepositoryList(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	// Action: List tasks immediately when empty
+	result := runCmdE2E(t, workspaceDir, "task", "list")
+	
+	// Outcome: Assert data contains empty array []
+	data, ok := result["data"].([]interface{})
+	if !ok {
+		t.Fatalf("expected data array, got %v", result["data"])
+	}
+	if len(data) != 0 {
+		t.Errorf("expected empty array, got %d items", len(data))
+	}
+}
+
+func TestE2E_SoftDelete_IndexSync(t *testing.T) {
+	workspaceDir := t.TempDir()
+	runCmdE2E(t, workspaceDir, "init")
+
+	addRes := runCmdE2E(t, workspaceDir, "task", "add", "To delete")
+	taskID := addRes["data"].(map[string]interface{})["id"].(string)
+
+	// Action: Delete task
+	runCmdE2E(t, workspaceDir, "task", "delete", taskID)
+
+	// Outcome: Check SQLite index directly to verify deletedAt is set
+	db, err := sql.Open("sqlite3", filepath.Join(workspaceDir, "index.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	var deletedAt sql.NullString
+	err = db.QueryRow("SELECT deletedAt FROM tasks WHERE id = ?", taskID).Scan(&deletedAt)
+	if err != nil {
+		t.Fatalf("query task row: %v", err)
+	}
+	if !deletedAt.Valid || deletedAt.String == "" {
+		t.Errorf("expected deletedAt to be set in SQLite index for task %s", taskID)
+	}
+
+	// Verify task list does not return it by default
+	listRes := runCmdE2E(t, workspaceDir, "task", "list")
+	listData := listRes["data"].([]interface{})
+	for _, item := range listData {
+		obj := item.(map[string]interface{})
+		if obj["id"].(string) == taskID {
+			t.Errorf("deleted task %s should not appear in default list", taskID)
+		}
 	}
 }
 

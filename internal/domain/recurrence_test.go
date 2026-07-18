@@ -132,3 +132,28 @@ func TestRecurrenceDSTTransition(t *testing.T) {
 		t.Errorf("expected due date to remain 09:00:00 across DST transition, got %v (expected %v)", newTask.DueDate, expectedDue)
 	}
 }
+
+func TestRecurrenceFluidCatchup(t *testing.T) {
+	// Setup: Create a daily task due yesterday. Strategy "fluid".
+	yesterday := time.Now().Add(-24 * time.Hour).Truncate(time.Second)
+	completedAt := time.Now().Truncate(time.Second)
+
+	task := &Task{
+		ID:      "t1",
+		Status:  TaskStatusDone,
+		DueDate: &yesterday,
+		Recurrence: &RecurrenceRule{
+			Rule:     "daily",
+			Strategy: "fluid",
+		},
+	}
+
+	// Action: Complete the task today.
+	newTask := task.DuplicateRecurringTask("t2", completedAt, TaskStatusDone)
+
+	// Outcome: Assert the newly spawned task is due tomorrow (base = today + 1 day = completedAt + 1 day).
+	expectedDue := completedAt.AddDate(0, 0, 1)
+	if newTask.DueDate == nil || !newTask.DueDate.Equal(expectedDue) {
+		t.Errorf("expected fluid daily task due date to be %v, got %v", expectedDue, newTask.DueDate)
+	}
+}

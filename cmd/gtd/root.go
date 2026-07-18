@@ -152,7 +152,7 @@ func formatOutputData(data interface{}) interface{} {
 		// Already decorated (e.g. parse invalid-date feedback); leave as-is.
 		return v
 	case []*domain.Task:
-		var out []interface{}
+		out := make([]interface{}, 0)
 		for _, t := range v {
 			warnings := domain.ValidateTaskCoherence(t)
 			if len(warnings) > 0 {
@@ -169,7 +169,7 @@ func formatOutputData(data interface{}) interface{} {
 		}
 		return out
 	case []interface{}:
-		var out []interface{}
+		out := make([]interface{}, 0)
 		for _, item := range v {
 			out = append(out, formatOutputData(item))
 		}
@@ -304,9 +304,14 @@ func printError(err error) {
 	}
 	
 	code := "ERR_UNKNOWN"
+	errStr := err.Error()
 	if errors.Is(err, domain.ErrNotFound) {
 		code = "ERR_NOT_FOUND"
-	} else if errors.Is(err, domain.ErrValidation) {
+	} else if errors.Is(err, domain.ErrValidation) ||
+		strings.Contains(errStr, "accepts ") ||
+		strings.Contains(errStr, "requires ") ||
+		strings.Contains(errStr, "unknown flag") ||
+		strings.Contains(errStr, "flag needs an argument") {
 		code = "ERR_VALIDATION"
 	}
 

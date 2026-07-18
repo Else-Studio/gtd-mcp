@@ -1,9 +1,9 @@
 package domain
 
 type EntityCatalog struct {
-	Projects []Project
-	Areas    []Area
-	People   []Person
-	Tags     []string
-	Contexts []string
+	Projects []Project `json:"projects"`
+	Areas    []Area    `json:"areas"`
+	People   []Person  `json:"people"`
+	Tags     []string  `json:"tags"`
+	Contexts []string  `json:"contexts"`
 }

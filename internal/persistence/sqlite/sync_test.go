@@ -139,6 +139,69 @@ func TestSyncEngineScale(t *testing.T) {
 	}
 }
 
+func TestNormalizeTaskForLoad_AdditionalScenarios(t *testing.T) {
+	fixedNow := time.Date(2026, 7, 18, 11, 0, 0, 0, time.UTC)
+
+	// Scenario A: Missing Completion Time for Done status
+	t.Run("missing completion time", func(t *testing.T) {
+		task := &domain.Task{
+			ID:        "t-done-no-completed",
+			Status:    domain.TaskStatusDone,
+			UpdatedAt: fixedNow.Add(-1 * time.Hour),
+		}
+		sqlite.NormalizeTaskForLoad(task, fixedNow)
+		if task.CompletedAt == nil {
+			t.Fatal("expected CompletedAt to be populated, got nil")
+		}
+		if !task.CompletedAt.Equal(task.UpdatedAt) {
+			t.Errorf("expected CompletedAt to equal UpdatedAt (%v), got %v", task.UpdatedAt, *task.CompletedAt)
+		}
+	})
+
+	// Scenario B: Active Task with CompletedAt should have it cleared
+	t.Run("active task with completed at", func(t *testing.T) {
+		completedTime := fixedNow.Add(-2 * time.Hour)
+		task := &domain.Task{
+			ID:          "t-active-with-completed",
+			Status:      domain.TaskStatusNext,
+			CompletedAt: &completedTime,
+		}
+		sqlite.NormalizeTaskForLoad(task, fixedNow)
+		if task.CompletedAt != nil {
+			t.Errorf("expected CompletedAt to be cleared (nil) for active task, got %v", *task.CompletedAt)
+		}
+	})
+
+	// Scenario C: Missing Timestamps should default to now
+	t.Run("missing timestamps", func(t *testing.T) {
+		task := &domain.Task{
+			ID:     "t-no-timestamps",
+			Status: domain.TaskStatusInbox,
+		}
+		sqlite.NormalizeTaskForLoad(task, fixedNow)
+		if !task.CreatedAt.Equal(fixedNow) {
+			t.Errorf("expected CreatedAt to be %v, got %v", fixedNow, task.CreatedAt)
+		}
+		if !task.UpdatedAt.Equal(fixedNow) {
+			t.Errorf("expected UpdatedAt to be %v, got %v", fixedNow, task.UpdatedAt)
+		}
+	})
+
+	// Scenario D: UpdatedAt before CreatedAt correction
+	t.Run("updated before created", func(t *testing.T) {
+		task := &domain.Task{
+			ID:        "t-time-anomaly",
+			Status:    domain.TaskStatusInbox,
+			CreatedAt: fixedNow,
+			UpdatedAt: fixedNow.Add(-1 * time.Hour),
+		}
+		sqlite.NormalizeTaskForLoad(task, fixedNow)
+		if !task.UpdatedAt.Equal(task.CreatedAt) {
+			t.Errorf("expected UpdatedAt to be normalized to CreatedAt (%v), got %v", task.CreatedAt, task.UpdatedAt)
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
@@ -146,3 +209,4 @@ func contains(s, substr string) bool {
 func strPtr(s string) *string {
 	return &s
 }
+

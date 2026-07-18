@@ -242,3 +242,89 @@ func TestListAgendaTasks_DateOnlyTodayAndReferenceExcluded(t *testing.T) {
 		t.Error("expected timed due in the past to be included")
 	}
 }
+
+func TestTaskQuery_ListNextTasks_ProjectInheritance(t *testing.T) {
+	db, err := sqlite.NewDB("file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	engine := sqlite.NewSyncEngine(db, nil, nil, nil, nil)
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+
+	// 1. Seed Projects of different statuses
+	activeProjID := "proj-active"
+	somedayProjID := "proj-someday"
+	archivedProjID := "proj-archived"
+	deletedProjID := "proj-deleted"
+
+	if err := engine.SyncProject(context.Background(), &domain.Project{
+		ID: activeProjID, Title: "Active Project", Status: domain.ProjectStatusActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("sync active project: %v", err)
+	}
+
+	if err := engine.SyncProject(context.Background(), &domain.Project{
+		ID: somedayProjID, Title: "Someday Project", Status: domain.ProjectStatusSomeday, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("sync someday project: %v", err)
+	}
+
+	if err := engine.SyncProject(context.Background(), &domain.Project{
+		ID: archivedProjID, Title: "Archived Project", Status: domain.ProjectStatusArchived, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("sync archived project: %v", err)
+	}
+
+	deletedTime := now.Add(-1 * time.Hour)
+	if err := engine.SyncProject(context.Background(), &domain.Project{
+		ID: deletedProjID, Title: "Deleted Project", Status: domain.ProjectStatusActive, DeletedAt: &deletedTime, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("sync deleted project: %v", err)
+	}
+
+	// 2. Seed Tasks (all having 'next' status)
+	tasks := []*domain.Task{
+		{ID: "t-no-project", Title: "Loose task", Status: domain.TaskStatusNext, CreatedAt: now, UpdatedAt: now},
+		{ID: "t-active-project", Title: "Task under active proj", Status: domain.TaskStatusNext, ProjectID: &activeProjID, CreatedAt: now, UpdatedAt: now},
+		{ID: "t-someday-project", Title: "Task under someday proj", Status: domain.TaskStatusNext, ProjectID: &somedayProjID, CreatedAt: now, UpdatedAt: now},
+		{ID: "t-archived-project", Title: "Task under archived proj", Status: domain.TaskStatusNext, ProjectID: &archivedProjID, CreatedAt: now, UpdatedAt: now},
+		{ID: "t-deleted-project", Title: "Task under deleted proj", Status: domain.TaskStatusNext, ProjectID: &deletedProjID, CreatedAt: now, UpdatedAt: now},
+	}
+
+	for _, task := range tasks {
+		if err := engine.SyncTask(context.Background(), task, now); err != nil {
+			t.Fatalf("sync task %s: %v", task.ID, err)
+		}
+	}
+
+	// 3. Query ListNextTasks
+	q := sqlite.NewTaskQuery(db)
+	nextIDs, err := q.ListNextTasks(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListNextTasks failed: %v", err)
+	}
+
+	// 4. Assertions
+	has := map[string]bool{}
+	for _, id := range nextIDs {
+		has[id] = true
+	}
+
+	if !has["t-no-project"] {
+		t.Error("expected loose next task (no project) to be included")
+	}
+	if !has["t-active-project"] {
+		t.Error("expected next task under active project to be included")
+	}
+	if has["t-someday-project"] {
+		t.Error("expected next task under someday project to be excluded")
+	}
+	if has["t-archived-project"] {
+		t.Error("expected next task under archived project to be excluded")
+	}
+	if has["t-deleted-project"] {
+		t.Error("expected next task under deleted project to be excluded")
+	}
+}

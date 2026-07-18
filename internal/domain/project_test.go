@@ -89,3 +89,24 @@ func TestProjectValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectUpdateStatus(t *testing.T) {
+	// Setup: Create a project with ProjectStatusActive and a fixed UpdatedAt.
+	project := &Project{
+		ID:        "proj1",
+		Status:    ProjectStatusActive,
+		UpdatedAt: time.Time{},
+	}
+	now := time.Now().Truncate(time.Second)
+
+	// Action: Call UpdateStatus(ProjectStatusSomeday, now).
+	project.UpdateStatus(ProjectStatusSomeday, now)
+
+	// Outcome: Assert Status is updated and UpdatedAt exactly matches 'now'.
+	if project.Status != ProjectStatusSomeday {
+		t.Errorf("expected status 'someday', got %s", project.Status)
+	}
+	if !project.UpdatedAt.Equal(now) {
+		t.Errorf("expected UpdatedAt to be %v, got %v", now, project.UpdatedAt)
+	}
+}
