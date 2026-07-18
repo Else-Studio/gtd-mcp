@@ -39,7 +39,19 @@ func TestPerfectRoundTrip(t *testing.T) {
 		t.Fatalf("failed to load: %v", err)
 	}
 
+	if !task.CreatedAt.Equal(loaded.CreatedAt) {
+		t.Errorf("CreatedAt differs. Expected %v, got %v", task.CreatedAt, loaded.CreatedAt)
+	}
+	// Sync time pointers to avoid reflect.DeepEqual failing on time.Location pointer addresses
+	task.CreatedAt = loaded.CreatedAt
 	task.UpdatedAt = loaded.UpdatedAt
+
+	if task.DueDate != nil && loaded.DueDate != nil {
+		if !task.DueDate.Equal(*loaded.DueDate) {
+			t.Errorf("DueDate differs. Expected %v, got %v", *task.DueDate, *loaded.DueDate)
+		}
+		task.DueDate = loaded.DueDate
+	}
 
 	if !reflect.DeepEqual(task, loaded) {
 		t.Errorf("Round trip failed.\nExpected: %+v\nGot:      %+v", task, loaded)
