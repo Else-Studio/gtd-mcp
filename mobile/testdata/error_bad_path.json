@@ -1,0 +1,1 @@
+{"ok":false,"data":null,"error":{"code":"bad_path","message":"workspacePath and indexPath must be non-empty absolute paths"}}

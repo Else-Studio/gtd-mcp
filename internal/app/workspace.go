@@ -100,6 +100,14 @@ func (c *Context) Close() error {
 	return err
 }
 
+// SetIndexMaxOpenConns caps the index pool. Call after Open; not set in NewDB.
+func (c *Context) SetIndexMaxOpenConns(n int) {
+	if c == nil || c.db == nil {
+		return
+	}
+	c.db.SetMaxOpenConns(n)
+}
+
 type RebuildResult struct {
 	RebuiltAt        time.Time
 	Indexed          int
