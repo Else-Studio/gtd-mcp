@@ -123,3 +123,7 @@ func (r *ProjectRepository) Delete(id string) error {
 func (r *ProjectRepository) List() ([]*domain.Project, error) {
 	return r.generic.List()
 }
+
+func (r *ProjectRepository) ListDetail() (projects []*domain.Project, skipped []string, decodeErrs []error, err error) {
+	return r.generic.ListDetail()
+}

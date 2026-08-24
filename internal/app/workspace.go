@@ -100,12 +100,56 @@ func (c *Context) Close() error {
 	return err
 }
 
+type RebuildResult struct {
+	RebuiltAt        time.Time
+	Indexed          int
+	SkippedConflicts []string
+	Errors           []string
+}
+
 // RebuildIndex scans workspace markdown and rebuilds the sqlite index.
-func (c *Context) RebuildIndex(now time.Time) error {
-	if err := c.syncEngine.Sync(context.Background(), now); err != nil {
-		return fmt.Errorf("failed to sync index: %w", err)
+func (c *Context) RebuildIndex(now time.Time) (*RebuildResult, error) {
+	report, err := c.syncEngine.Sync(context.Background(), now)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sync index: %w", err)
 	}
-	return nil
+
+	var indexed int
+	if err := c.db.QueryRow(`SELECT COUNT(*) FROM tasks`).Scan(&indexed); err != nil {
+		return nil, fmt.Errorf("failed to count indexed tasks: %w", err)
+	}
+
+	skipped := []string{}
+	errs := []string{}
+	if report != nil {
+		skipped = uniqueStrings(report.SkippedConflicts)
+		if report.Errors != nil {
+			errs = report.Errors
+		}
+	}
+
+	return &RebuildResult{
+		RebuiltAt:        now.UTC(),
+		Indexed:          indexed,
+		SkippedConflicts: skipped,
+		Errors:           errs,
+	}, nil
+}
+
+func uniqueStrings(in []string) []string {
+	if len(in) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }
 
 func (c *Context) GetTask(id string) (*domain.Task, error) {

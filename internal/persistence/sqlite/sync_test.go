@@ -3,6 +3,8 @@ package sqlite_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +112,7 @@ func TestSyncEngineScale(t *testing.T) {
 	defer db.Close()
 
 	engine := sqlite.NewSyncEngine(db, taskRepo, nil, nil, nil)
-	if err := engine.Sync(context.Background(), now); err != nil {
+	if _, err := engine.Sync(context.Background(), now); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
 
@@ -202,6 +204,160 @@ func TestNormalizeTaskForLoad_AdditionalScenarios(t *testing.T) {
 	})
 }
 
+func TestSync_CommitsValidEntitiesWhenListReturnsParseErrors(t *testing.T) {
+	tempDir := t.TempDir()
+	taskRepo := fs.NewTaskRepository(tempDir)
+
+	now := time.Now()
+	valid := &domain.Task{
+		ID:        "valid-1",
+		Title:     "Valid Task",
+		Status:    domain.TaskStatusNext,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := taskRepo.Save(valid); err != nil {
+		t.Fatalf("save valid: %v", err)
+	}
+
+	corruptContent := []byte(`---
+status: [invalid yaml
+---
+Title`)
+	if err := os.WriteFile(filepath.Join(tempDir, "tasks", "corrupt-1.md"), corruptContent, 0644); err != nil {
+		t.Fatalf("write corrupt: %v", err)
+	}
+
+	db, err := sqlite.NewDB("file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	engine := sqlite.NewSyncEngine(db, taskRepo, nil, nil, nil)
+	report, err := engine.Sync(context.Background(), now)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if report.TaskCount != 1 {
+		t.Errorf("TaskCount = %d, want 1", report.TaskCount)
+	}
+	if len(report.Errors) == 0 {
+		t.Fatal("expected non-empty Errors")
+	}
+	if !contains(strings.Join(report.Errors, "\n"), "corrupt-1.md") {
+		t.Errorf("Errors should name the file, got %v", report.Errors)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM tasks").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("tasks count = %d, want 1", count)
+	}
+}
+
+func TestSync_SkipsSyncConflictFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	taskRepo := fs.NewTaskRepository(tempDir)
+
+	now := time.Now()
+	id := "valid-id"
+	valid := &domain.Task{
+		ID:        id,
+		Title:     "Valid Task",
+		Status:    domain.TaskStatusInbox,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := taskRepo.Save(valid); err != nil {
+		t.Fatalf("save valid: %v", err)
+	}
+
+	src, err := os.ReadFile(filepath.Join(tempDir, "tasks", id+".md"))
+	if err != nil {
+		t.Fatalf("read saved: %v", err)
+	}
+	conflictName := id + ".sync-conflict-20260824-120000-phone.md"
+	if err := os.WriteFile(filepath.Join(tempDir, "tasks", conflictName), src, 0644); err != nil {
+		t.Fatalf("write conflict: %v", err)
+	}
+
+	db, err := sqlite.NewDB("file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	engine := sqlite.NewSyncEngine(db, taskRepo, nil, nil, nil)
+	report, err := engine.Sync(context.Background(), now)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if report.TaskCount != 1 {
+		t.Errorf("TaskCount = %d, want 1", report.TaskCount)
+	}
+	if len(report.Errors) != 0 {
+		t.Errorf("Errors = %v, want empty", report.Errors)
+	}
+	foundSkip := false
+	for _, s := range report.SkippedConflicts {
+		if s == conflictName {
+			foundSkip = true
+		}
+	}
+	if !foundSkip {
+		t.Errorf("SkippedConflicts = %v, want to contain %s", report.SkippedConflicts, conflictName)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM tasks").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("tasks count = %d, want 1", count)
+	}
+}
+
+func TestSync_ReadDirFailureDoesNotCommitEmptyIndex(t *testing.T) {
+	root := t.TempDir()
+	db, err := sqlite.NewDB("file:" + filepath.ToSlash(filepath.Join(root, "index.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`INSERT INTO tasks (id, title, status, createdAt, updatedAt) VALUES ('seed', 'Seed', 'inbox', '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z')`)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	repoRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repoRoot, "tasks"), []byte("not a directory"), 0644); err != nil {
+		t.Fatalf("write file-as-dir: %v", err)
+	}
+	engine := sqlite.NewSyncEngine(db, fs.NewTaskRepository(repoRoot), nil, nil, nil)
+	if _, err := engine.Sync(context.Background(), time.Now()); err == nil {
+		t.Fatal("expected sync error from ReadDir failure")
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM tasks").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("expected seed row to remain after rollback, got count=%d", count)
+	}
+	var id string
+	if err := db.QueryRow("SELECT id FROM tasks").Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if id != "seed" {
+		t.Errorf("id = %q, want seed", id)
+	}
+}
+
 func contains(s, substr string) bool {
 	return strings.Contains(s, substr)
 }
@@ -209,4 +365,3 @@ func contains(s, substr string) bool {
 func strPtr(s string) *string {
 	return &s
 }
-

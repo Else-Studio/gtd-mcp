@@ -156,3 +156,7 @@ func (r *TaskRepository) Delete(id string) error {
 func (r *TaskRepository) List() ([]*domain.Task, error) {
 	return r.generic.List()
 }
+
+func (r *TaskRepository) ListDetail() (tasks []*domain.Task, skipped []string, decodeErrs []error, err error) {
+	return r.generic.ListDetail()
+}

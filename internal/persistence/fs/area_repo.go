@@ -104,3 +104,7 @@ func (r *AreaRepository) Delete(id string) error {
 func (r *AreaRepository) List() ([]*domain.Area, error) {
 	return r.generic.List()
 }
+
+func (r *AreaRepository) ListDetail() (areas []*domain.Area, skipped []string, decodeErrs []error, err error) {
+	return r.generic.ListDetail()
+}

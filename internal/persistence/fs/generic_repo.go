@@ -86,29 +86,48 @@ func (r *GenericRepo[T]) Delete(id string) error {
 	return os.Remove(path)
 }
 
-func (r *GenericRepo[T]) List() ([]T, error) {
-	var entities []T
-	var errs []error
+func isSyncConflictName(name string) bool {
+	return strings.Contains(name, ".sync-conflict-")
+}
 
-	dir := r.dir()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return entities, nil
+// skipped are on-disk filenames, not entity ids.
+// err is directory-level only (ReadDir other than missing dir).
+func (r *GenericRepo[T]) ListDetail() (entities []T, skipped []string, decodeErrs []error, err error) {
+	entries, readErr := os.ReadDir(r.dir())
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return entities, skipped, decodeErrs, nil
 		}
-		return nil, err
+		return nil, nil, nil, readErr
 	}
 
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-			id := strings.TrimSuffix(e.Name(), ".md")
-			entity, err := r.Get(id)
-			if err != nil {
-				errs = append(errs, err)
-			} else {
-				entities = append(entities, entity)
-			}
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if isSyncConflictName(name) {
+			skipped = append(skipped, name)
+			continue
+		}
+		id := strings.TrimSuffix(name, ".md")
+		entity, getErr := r.Get(id)
+		if getErr != nil {
+			decodeErrs = append(decodeErrs, fmt.Errorf("%s: %w", name, getErr))
+		} else {
+			entities = append(entities, entity)
 		}
 	}
-	return entities, errors.Join(errs...)
+	return entities, skipped, decodeErrs, nil
+}
+
+func (r *GenericRepo[T]) List() ([]T, error) {
+	entities, _, decodeErrs, err := r.ListDetail()
+	if err != nil {
+		return entities, err
+	}
+	return entities, errors.Join(decodeErrs...)
 }

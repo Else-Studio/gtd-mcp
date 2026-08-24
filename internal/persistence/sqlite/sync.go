@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"gtd/internal/domain"
@@ -39,75 +40,172 @@ func NewSyncEngine(
 	}
 }
 
-func (s *SyncEngine) Sync(ctx context.Context, now time.Time) error {
+type SyncReport struct {
+	TaskCount        int
+	SkippedConflicts []string
+	Errors           []string
+}
+
+type taskDetailLister interface {
+	ListDetail() ([]*domain.Task, []string, []error, error)
+}
+
+type projectDetailLister interface {
+	ListDetail() ([]*domain.Project, []string, []error, error)
+}
+
+type areaDetailLister interface {
+	ListDetail() ([]*domain.Area, []string, []error, error)
+}
+
+type personDetailLister interface {
+	ListDetail() ([]*domain.Person, []string, []error, error)
+}
+
+func (s *SyncEngine) Sync(ctx context.Context, now time.Time) (*SyncReport, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
+
+	report := &SyncReport{
+		SkippedConflicts: []string{},
+		Errors:           []string{},
+	}
 
 	// Clear existing cache since it's a full sync
 	tables := []string{"tasks", "projects", "areas", "people"}
 	for _, t := range tables {
 		if _, err := tx.Exec("DELETE FROM " + t); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
 	if s.areaRepo != nil {
-		areas, err := s.areaRepo.List()
+		areas, skipped, decodeErrs, err := listAreas(s.areaRepo)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		appendSoft(report, skipped, decodeErrs)
 		for _, a := range areas {
 			if err := insertArea(tx, a); err != nil {
-				return err
+				report.Errors = append(report.Errors, fmt.Errorf("%s: %w", a.ID, err).Error())
 			}
 		}
 	}
 
 	if s.projectRepo != nil {
-		projects, err := s.projectRepo.List()
+		projects, skipped, decodeErrs, err := listProjects(s.projectRepo)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		appendSoft(report, skipped, decodeErrs)
 		for _, p := range projects {
 			if err := insertProject(tx, p); err != nil {
-				return err
+				report.Errors = append(report.Errors, fmt.Errorf("%s: %w", p.ID, err).Error())
 			}
 		}
 	}
-
-
 
 	if s.personRepo != nil {
-		people, err := s.personRepo.List()
+		people, skipped, decodeErrs, err := listPeople(s.personRepo)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		appendSoft(report, skipped, decodeErrs)
 		for _, p := range people {
 			if err := insertPerson(tx, p); err != nil {
-				return err
+				report.Errors = append(report.Errors, fmt.Errorf("%s: %w", p.ID, err).Error())
 			}
 		}
 	}
 
-
-
 	if s.taskRepo != nil {
-		tasks, err := s.taskRepo.List()
+		tasks, skipped, decodeErrs, err := listTasks(s.taskRepo)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		appendSoft(report, skipped, decodeErrs)
 		for _, t := range tasks {
 			NormalizeTaskForLoad(t, now)
 			if err := insertTask(tx, t); err != nil {
-				return err
+				report.Errors = append(report.Errors, fmt.Errorf("%s: %w", t.ID, err).Error())
+				continue
 			}
+			report.TaskCount++
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+func appendSoft(report *SyncReport, skipped []string, decodeErrs []error) {
+	report.SkippedConflicts = append(report.SkippedConflicts, skipped...)
+	for _, e := range decodeErrs {
+		if e != nil {
+			report.Errors = append(report.Errors, e.Error())
+		}
+	}
+}
+
+func listTasks(repo domain.TaskRepository) ([]*domain.Task, []string, []error, error) {
+	if d, ok := repo.(taskDetailLister); ok {
+		return d.ListDetail()
+	}
+	tasks, err := repo.List()
+	if err != nil && len(tasks) == 0 {
+		return tasks, nil, nil, err
+	}
+	if err != nil {
+		return tasks, nil, []error{err}, nil
+	}
+	return tasks, nil, nil, nil
+}
+
+func listProjects(repo domain.ProjectRepository) ([]*domain.Project, []string, []error, error) {
+	if d, ok := repo.(projectDetailLister); ok {
+		return d.ListDetail()
+	}
+	projects, err := repo.List()
+	if err != nil && len(projects) == 0 {
+		return projects, nil, nil, err
+	}
+	if err != nil {
+		return projects, nil, []error{err}, nil
+	}
+	return projects, nil, nil, nil
+}
+
+func listAreas(repo domain.AreaRepository) ([]*domain.Area, []string, []error, error) {
+	if d, ok := repo.(areaDetailLister); ok {
+		return d.ListDetail()
+	}
+	areas, err := repo.List()
+	if err != nil && len(areas) == 0 {
+		return areas, nil, nil, err
+	}
+	if err != nil {
+		return areas, nil, []error{err}, nil
+	}
+	return areas, nil, nil, nil
+}
+
+func listPeople(repo domain.PersonRepository) ([]*domain.Person, []string, []error, error) {
+	if d, ok := repo.(personDetailLister); ok {
+		return d.ListDetail()
+	}
+	people, err := repo.List()
+	if err != nil && len(people) == 0 {
+		return people, nil, nil, err
+	}
+	if err != nil {
+		return people, nil, []error{err}, nil
+	}
+	return people, nil, nil, nil
 }
 
 func (s *SyncEngine) SyncTask(ctx context.Context, t *domain.Task, now time.Time) error {
@@ -159,8 +257,6 @@ func (s *SyncEngine) SyncArea(ctx context.Context, a *domain.Area) error {
 	return tx.Commit()
 }
 
-
-
 func (s *SyncEngine) SyncPerson(ctx context.Context, p *domain.Person) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -175,8 +271,6 @@ func (s *SyncEngine) SyncPerson(ctx context.Context, p *domain.Person) error {
 	}
 	return tx.Commit()
 }
-
-
 
 func NormalizeTaskForLoad(t *domain.Task, now time.Time) {
 	if t.CreatedAt.IsZero() {
@@ -247,8 +341,6 @@ func insertTask(tx *sql.Tx, t *domain.Task) error {
 	return err
 }
 
-
-
 func insertPerson(tx *sql.Tx, p *domain.Person) error {
 	query := `INSERT INTO people (id, name, note, referenceLink, createdAt, updatedAt, deletedAt)
 	VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -258,8 +350,6 @@ func insertPerson(tx *sql.Tx, p *domain.Person) error {
 	)
 	return err
 }
-
-
 
 func timeString(t time.Time) string {
 	if t.IsZero() {
@@ -280,7 +370,7 @@ func jsonString(v any) *string {
 	if v == nil {
 		return nil
 	}
-	
+
 	// Handle nil slices specifically
 	switch val := v.(type) {
 	case []string:
@@ -292,7 +382,7 @@ func jsonString(v any) *string {
 			return nil
 		}
 	}
-	
+
 	b, err := json.Marshal(v)
 	if err != nil || string(b) == "null" {
 		return nil

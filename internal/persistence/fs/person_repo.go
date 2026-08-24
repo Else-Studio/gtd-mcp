@@ -99,3 +99,7 @@ func (r *PersonRepository) Delete(id string) error {
 func (r *PersonRepository) List() ([]*domain.Person, error) {
 	return r.generic.List()
 }
+
+func (r *PersonRepository) ListDetail() (people []*domain.Person, skipped []string, decodeErrs []error, err error) {
+	return r.generic.ListDetail()
+}

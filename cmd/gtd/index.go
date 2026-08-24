@@ -30,12 +30,16 @@ Run this command at the start of a session or during a Weekly Review to ensure d
 		}
 		defer appCtx.Close()
 
-		if err := appCtx.RebuildIndex(time.Now()); err != nil {
+		result, err := appCtx.RebuildIndex(time.Now())
+		if err != nil {
 			return err
 		}
 
-		printSuccess(map[string]string{
-			"message": "Index rebuilt successfully",
+		printSuccess(map[string]interface{}{
+			"message":          "Index rebuilt successfully",
+			"indexed":          result.Indexed,
+			"skippedConflicts": result.SkippedConflicts,
+			"errors":           result.Errors,
 		})
 		return nil
 	},
