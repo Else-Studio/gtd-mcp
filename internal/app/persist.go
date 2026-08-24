@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -15,16 +15,16 @@ import (
 //	index.db        = rebuildable read cache (filters, joins, catalogs)
 //
 // Write path: validate/normalize → file Save → in-process SQLite Sync for that
-// entity. Command handlers must use Persist* helpers; do not call bare
+// entity. Callers must use Persist* helpers; do not call bare
 // repo.Save + syncEngine.Sync* pairs. External file edits require
-// `gtd index rebuild`.
+// RebuildIndex (CLI: `gtd index rebuild`).
 //
 // Normalize policy A: apply sqlite.NormalizeTaskForLoad on the domain object
-// *before* file Save so the file and SQL always match after a CLI write.
+// *before* file Save so the file and SQL always match after a successful write.
 
 // PersistTask normalizes the task (policy A), writes the markdown file, then
 // upserts the SQLite row. If Save fails, Sync is not attempted.
-func (c *appContext) PersistTask(t *domain.Task, now time.Time) error {
+func (c *Context) PersistTask(t *domain.Task, now time.Time) error {
 	if t == nil {
 		return fmt.Errorf("persist task: nil task")
 	}
@@ -39,7 +39,7 @@ func (c *appContext) PersistTask(t *domain.Task, now time.Time) error {
 }
 
 // PersistProject writes the project file then upserts the SQLite row.
-func (c *appContext) PersistProject(p *domain.Project) error {
+func (c *Context) PersistProject(p *domain.Project) error {
 	if p == nil {
 		return fmt.Errorf("persist project: nil project")
 	}
@@ -53,7 +53,7 @@ func (c *appContext) PersistProject(p *domain.Project) error {
 }
 
 // PersistArea writes the area file then upserts the SQLite row.
-func (c *appContext) PersistArea(a *domain.Area) error {
+func (c *Context) PersistArea(a *domain.Area) error {
 	if a == nil {
 		return fmt.Errorf("persist area: nil area")
 	}
@@ -67,7 +67,7 @@ func (c *appContext) PersistArea(a *domain.Area) error {
 }
 
 // PersistPerson writes the person file then upserts the SQLite row.
-func (c *appContext) PersistPerson(p *domain.Person) error {
+func (c *Context) PersistPerson(p *domain.Person) error {
 	if p == nil {
 		return fmt.Errorf("persist person: nil person")
 	}

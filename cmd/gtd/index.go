@@ -1,14 +1,11 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
-	"gtd/internal/persistence/fs"
-	"gtd/internal/persistence/sqlite"
+	"gtd/internal/app"
 )
 
 var indexCmd = &cobra.Command{
@@ -27,26 +24,14 @@ Run this command at the start of a session or during a Weekly Review to ensure d
 			return err
 		}
 
-		dbFile := filepath.Join(gtdDir, "index.db")
-		dsn := fmt.Sprintf("file:%s?_journal=WAL", filepath.ToSlash(dbFile))
-		db, err := sqlite.NewDB(dsn)
+		appCtx, err := app.Open(gtdDir, filepath.Join(gtdDir, "index.db"))
 		if err != nil {
-			return fmt.Errorf("failed to open sqlite db: %w", err)
+			return err
 		}
-		defer db.Close()
+		defer appCtx.Close()
 
-		taskRepo := fs.NewTaskRepository(filepath.Join(gtdDir, "tasks"))
-		projectRepo := fs.NewProjectRepository(filepath.Join(gtdDir, "projects"))
-		areaRepo := fs.NewAreaRepository(filepath.Join(gtdDir, "areas"))
-		personRepo := fs.NewPersonRepository(filepath.Join(gtdDir, "people"))
-
-		syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, personRepo)
-
-		ctx := context.Background()
-		now := time.Now()
-
-		if err := syncEngine.Sync(ctx, now); err != nil {
-			return fmt.Errorf("failed to sync index: %w", err)
+		if err := appCtx.RebuildIndex(time.Now()); err != nil {
+			return err
 		}
 
 		printSuccess(map[string]string{

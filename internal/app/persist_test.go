@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"errors"
@@ -37,7 +37,7 @@ func TestPersistTask_DoesNotLeaveOrphanIndexIfSaveFails(t *testing.T) {
 
 	failRepo := &saveFailTaskRepo{}
 	engine := sqlite.NewSyncEngine(db, failRepo, nil, nil, nil)
-	appCtx := &appContext{
+	appCtx := &Context{
 		db:         db,
 		syncEngine: engine,
 		taskRepo:   failRepo,
@@ -82,7 +82,7 @@ func TestPersistTask_NormalizeBeforeSave_SetsCompletedAt(t *testing.T) {
 
 	mem := &memoryTaskRepo{byID: map[string]*domain.Task{}}
 	engine := sqlite.NewSyncEngine(db, mem, nil, nil, nil)
-	appCtx := &appContext{
+	appCtx := &Context{
 		db:         db,
 		syncEngine: engine,
 		taskRepo:   mem,

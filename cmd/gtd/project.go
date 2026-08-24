@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+	"gtd/internal/app"
 )
 
 var projectCmd = &cobra.Command{
@@ -22,9 +23,9 @@ The project is initialized in the 'active' status. Returns the JSON project repr
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		opts := CreateProjectOptions{Title: args[0]}
+		opts := app.CreateProjectOptions{Title: args[0]}
 		opts.AreaID, _ = cmd.Flags().GetString("area-id")
 		opts.AreaName, _ = cmd.Flags().GetString("area")
 
@@ -48,9 +49,9 @@ The --status flag allows changing the status of the project (e.g. active, someda
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		opts := UpdateProjectOptions{}
+		opts := app.UpdateProjectOptions{}
 		opts.Status, _ = cmd.Flags().GetString("status")
 		areaID, _ := cmd.Flags().GetString("area-id")
 		opts.AreaName, _ = cmd.Flags().GetString("area")
@@ -58,7 +59,7 @@ The --status flag allows changing the status of the project (e.g. active, someda
 		// areaID from the flag is usually only non-empty when Changed; AreaName
 		// resolution happens inside UpdateProject.
 		if cmd.Flags().Changed("area-id") {
-			opts.AreaID = optionalString{Set: true, Value: areaID}
+			opts.AreaID = app.OptionalString{Set: true, Value: areaID}
 			opts.AreaFlagUsed = true
 		}
 
@@ -82,7 +83,7 @@ Soft-deleted projects are hidden from normal list views.`,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		project, err := appCtx.DeleteProject(args[0])
 		if err != nil {
@@ -103,7 +104,7 @@ var projectRestoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		project, err := appCtx.RestoreProject(args[0])
 		if err != nil {
@@ -124,7 +125,7 @@ Returns a JSON list of IDs. When --plain is specified, fetches and outputs a det
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		ids, err := appCtx.ListActiveProjectIDs()
 		if err != nil {

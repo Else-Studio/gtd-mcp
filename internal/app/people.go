@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 )
 
 // CreatePerson creates a person with the given name.
-func (c *appContext) CreatePerson(name string) (*domain.Person, error) {
+func (c *Context) CreatePerson(name string) (*domain.Person, error) {
 	person := &domain.Person{
 		ID:   uuid.New().String(),
 		Name: name,
@@ -27,7 +27,7 @@ type UpdatePersonOptions struct {
 }
 
 // UpdatePerson loads a person, applies name change if set, and persists.
-func (c *appContext) UpdatePerson(id string, opts UpdatePersonOptions) (*domain.Person, error) {
+func (c *Context) UpdatePerson(id string, opts UpdatePersonOptions) (*domain.Person, error) {
 	person, err := c.personRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("person not found: %w", err)
@@ -45,7 +45,7 @@ func (c *appContext) UpdatePerson(id string, opts UpdatePersonOptions) (*domain.
 }
 
 // DeletePerson soft-deletes a person by ID.
-func (c *appContext) DeletePerson(id string) (*domain.Person, error) {
+func (c *Context) DeletePerson(id string) (*domain.Person, error) {
 	person, err := c.personRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("person not found: %w", err)
@@ -61,7 +61,7 @@ func (c *appContext) DeletePerson(id string) (*domain.Person, error) {
 }
 
 // ListActivePeople returns non-deleted people.
-func (c *appContext) ListActivePeople() ([]*domain.Person, error) {
+func (c *Context) ListActivePeople() ([]*domain.Person, error) {
 	people, err := c.personRepo.List()
 	if err != nil {
 		return nil, fmt.Errorf("list people: %w", err)

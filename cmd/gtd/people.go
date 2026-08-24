@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+	"gtd/internal/app"
 )
 
 var peopleCmd = &cobra.Command{
@@ -21,7 +22,7 @@ var peopleAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		person, err := appCtx.CreatePerson(args[0])
 		if err != nil {
@@ -42,7 +43,7 @@ var peopleDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		person, err := appCtx.DeletePerson(args[0])
 		if err != nil {
@@ -63,7 +64,7 @@ Defaults to JSON. When --plain is specified, prints an ASCII table (ID, NAME).`,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		activePeople, err := appCtx.ListActivePeople()
 		if err != nil {
@@ -84,10 +85,10 @@ var peopleUpdateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		name, _ := cmd.Flags().GetString("name")
-		person, err := appCtx.UpdatePerson(args[0], UpdatePersonOptions{Name: name})
+		person, err := appCtx.UpdatePerson(args[0], app.UpdatePersonOptions{Name: name})
 		if err != nil {
 			return err
 		}

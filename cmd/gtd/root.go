@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"gtd/internal/app"
 	"gtd/internal/domain"
-	"gtd/internal/persistence/fs"
-	"gtd/internal/persistence/sqlite"
 
 	"github.com/spf13/cobra"
 )
@@ -80,53 +78,12 @@ func getWorkspaceDir() (string, error) {
 	return dir, nil
 }
 
-// appContext wires file repos (source of truth) and the SQLite read index.
-// All entity writes go through Persist* (file first, then Sync). See persist.go.
-type appContext struct {
-	db          *sql.DB
-	syncEngine  *sqlite.SyncEngine
-	taskQuery   *sqlite.TaskQuery
-	taskRepo    domain.TaskRepository
-	projectRepo domain.ProjectRepository
-	areaRepo    domain.AreaRepository
-	personRepo  domain.PersonRepository
-	cleanup     func()
-}
-
-func getAppContext() (*appContext, error) {
+func getAppContext() (*app.Context, error) {
 	wsDir, err := getWorkspaceDir()
 	if err != nil {
 		return nil, err
 	}
-	dbFile := filepath.Join(wsDir, "index.db")
-	dsn := fmt.Sprintf("file:%s?_journal=WAL", filepath.ToSlash(dbFile))
-	db, err := sqlite.NewDB(dsn)
-	if err != nil {
-		return nil, err
-	}
-
-	taskRepo := fs.NewTaskRepository(filepath.Join(wsDir, "tasks"))
-	projectRepo := fs.NewProjectRepository(filepath.Join(wsDir, "projects"))
-	areaRepo := fs.NewAreaRepository(filepath.Join(wsDir, "areas"))
-	personRepo := fs.NewPersonRepository(filepath.Join(wsDir, "people"))
-
-	syncEngine := sqlite.NewSyncEngine(db, taskRepo, projectRepo, areaRepo, personRepo)
-	taskQuery := sqlite.NewTaskQuery(db)
-
-	cleanup := func() {
-		db.Close()
-	}
-
-	return &appContext{
-		db:          db,
-		syncEngine:  syncEngine,
-		taskQuery:   taskQuery,
-		taskRepo:    taskRepo,
-		projectRepo: projectRepo,
-		areaRepo:    areaRepo,
-		personRepo:  personRepo,
-		cleanup:     cleanup,
-	}, nil
+	return app.Open(wsDir, filepath.Join(wsDir, "index.db"))
 }
 
 func init() {
@@ -179,20 +136,20 @@ func formatOutputData(data interface{}) interface{} {
 	}
 }
 
-func resolveTasks(appCtx *appContext, ids []string) interface{} {
+func resolveTasks(appCtx *app.Context, ids []string) interface{} {
 	tasks := make([]*domain.Task, 0)
 	for _, id := range ids {
-		if t, err := appCtx.taskRepo.Get(id); err == nil {
+		if t, err := appCtx.GetTask(id); err == nil {
 			tasks = append(tasks, t)
 		}
 	}
 	return tasks
 }
 
-func resolveProjects(appCtx *appContext, ids []string) interface{} {
+func resolveProjects(appCtx *app.Context, ids []string) interface{} {
 	projects := make([]*domain.Project, 0)
 	for _, id := range ids {
-		if p, err := appCtx.projectRepo.Get(id); err == nil {
+		if p, err := appCtx.GetProject(id); err == nil {
 			projects = append(projects, p)
 		}
 	}

@@ -1,9 +1,10 @@
-package main
+package app
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,7 +54,7 @@ type CreateTaskResult struct {
 
 // CreateTask parses NLP text, applies flag overrides, persists the task, and
 // auto-creates project/area when the parser requests them by title/name.
-func (c *appContext) CreateTask(opts CreateTaskOptions) (*CreateTaskResult, error) {
+func (c *Context) CreateTask(opts CreateTaskOptions) (*CreateTaskResult, error) {
 	catalog, err := c.taskQuery.GetEntityCatalog(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("get catalog: %w", err)
@@ -190,20 +191,20 @@ func (c *appContext) CreateTask(opts CreateTaskOptions) (*CreateTaskResult, erro
 }
 
 // UpdateTaskOptions holds optional NLP text and flag-driven field updates.
-// optionalString fields: Set false = leave alone; Set true = apply Value (empty clears).
+// OptionalString fields: Set false = leave alone; Set true = apply Value (empty clears).
 // Contexts/Tags: Set true with empty Value clears the slice; non-empty replaces
 // the whole list (comma-separated values).
 type UpdateTaskOptions struct {
 	Text        string
 	Status      string // empty = no status flag
-	ProjectID   optionalString
-	AreaID      optionalString
-	AreaName    optionalString
-	AssignedTo  optionalString
-	StartOffset optionalString
-	Recurrence  optionalString
-	Contexts    optionalString
-	Tags        optionalString
+	ProjectID   OptionalString
+	AreaID      OptionalString
+	AreaName    OptionalString
+	AssignedTo  OptionalString
+	StartOffset OptionalString
+	Recurrence  OptionalString
+	Contexts    OptionalString
+	Tags        OptionalString
 }
 
 // UpdateTaskResult is the updated task plus presentation side-data for the CLI.
@@ -216,7 +217,7 @@ type UpdateTaskResult struct {
 
 // UpdateTask loads a task, applies NLP and flag updates, persists, may spawn the
 // next recurring occurrence, and reports project-stall telemetry.
-func (c *appContext) UpdateTask(id string, opts UpdateTaskOptions) (*UpdateTaskResult, error) {
+func (c *Context) UpdateTask(id string, opts UpdateTaskOptions) (*UpdateTaskResult, error) {
 	task, err := c.taskRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
@@ -472,7 +473,7 @@ func (c *appContext) UpdateTask(id string, opts UpdateTaskOptions) (*UpdateTaskR
 }
 
 // DeleteTask soft-deletes a task by ID and returns the updated entity for printing.
-func (c *appContext) DeleteTask(id string) (*domain.Task, error) {
+func (c *Context) DeleteTask(id string) (*domain.Task, error) {
 	task, err := c.taskRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
@@ -488,7 +489,7 @@ func (c *appContext) DeleteTask(id string) (*domain.Task, error) {
 }
 
 // RestoreTask clears soft-delete on a task and persists it.
-func (c *appContext) RestoreTask(id string) (*domain.Task, error) {
+func (c *Context) RestoreTask(id string) (*domain.Task, error) {
 	task, err := c.taskRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
@@ -515,7 +516,7 @@ type TaskListFilter struct {
 
 // ListTaskIDs returns active task IDs, optionally filtered by status and TaskListFilter.
 // Empty status lists all active tasks; non-empty uses ListTasksByStatus.
-func (c *appContext) ListTaskIDs(status string, f TaskListFilter) ([]string, error) {
+func (c *Context) ListTaskIDs(status string, f TaskListFilter) ([]string, error) {
 	filter := c.resolveTaskListFilter(f)
 	ctx := context.Background()
 	var ids []string
@@ -531,7 +532,7 @@ func (c *appContext) ListTaskIDs(status string, f TaskListFilter) ([]string, err
 	return ids, nil
 }
 
-func (c *appContext) resolveTaskListFilter(f TaskListFilter) *sqlite.TaskQueryFilter {
+func (c *Context) resolveTaskListFilter(f TaskListFilter) *sqlite.TaskQueryFilter {
 	filter := &sqlite.TaskQueryFilter{}
 
 	if f.AreaID != "" {
@@ -568,7 +569,7 @@ func (c *appContext) resolveTaskListFilter(f TaskListFilter) *sqlite.TaskQueryFi
 }
 
 // DuplicateTask deep-copies a task with a new ID, status next, and cleared completedAt.
-func (c *appContext) DuplicateTask(id string) (*domain.Task, error) {
+func (c *Context) DuplicateTask(id string) (*domain.Task, error) {
 	orig, err := c.taskRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
@@ -637,7 +638,7 @@ type PromoteTaskResult struct {
 
 // PromoteTask links a task to a project with the given title (reuse same-title
 // active project in the same area when possible; otherwise create one).
-func (c *appContext) PromoteTask(id, projectTitle string) (*PromoteTaskResult, error) {
+func (c *Context) PromoteTask(id, projectTitle string) (*PromoteTaskResult, error) {
 	task, err := c.taskRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("task not found: %w", err)
@@ -698,4 +699,65 @@ func (c *appContext) PromoteTask(id, projectTitle string) (*PromoteTaskResult, e
 		ProjectID: project.ID,
 		Task:      task,
 	}, nil
+}
+
+// rejectArchivedProject blocks task create/update when the container project is archived.
+func rejectArchivedProject(c *Context, projectID *string) error {
+	if projectID == nil || *projectID == "" {
+		return nil
+	}
+	project, err := c.projectRepo.Get(*projectID)
+	if err != nil {
+		return nil // missing project is not this rule's concern
+	}
+	if project.Status == domain.ProjectStatusArchived {
+		return fmt.Errorf("%w: cannot create or update tasks under archived project %q", domain.ErrValidation, project.Title)
+	}
+	return nil
+}
+
+// rejectArchivedProjectByTitle blocks auto-creating a twin project when an archived
+// project with the same title already exists (catalog omits archived, so NLP would
+// otherwise spawn a new active project with the same name).
+func rejectArchivedProjectByTitle(c *Context, title string) error {
+	projects, err := c.projectRepo.List()
+	if err != nil {
+		return fmt.Errorf("list projects: %w", err)
+	}
+	for _, p := range projects {
+		if p.DeletedAt != nil {
+			continue
+		}
+		if p.Title == title && p.Status == domain.ProjectStatusArchived {
+			return fmt.Errorf("%w: cannot create or update tasks under archived project %q", domain.ErrValidation, title)
+		}
+	}
+	return nil
+}
+
+// parseStartOffset accepts either JSON ({"amount":-1,"unit":"day"}) or a human
+// form like "-1 day" / "-30 minute".
+func parseStartOffset(s string) (*domain.RelativeOffset, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	var offset domain.RelativeOffset
+	if err := json.Unmarshal([]byte(s), &offset); err == nil && offset.Unit != "" {
+		return &offset, nil
+	}
+	parts := strings.Fields(s)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("expected JSON or \"<amount> <unit>\" (e.g. \"-1 day\"), got %q", s)
+	}
+	amount, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid amount %q: %w", parts[0], err)
+	}
+	unit := strings.ToLower(parts[1])
+	// Normalize plural units (days → day, minutes → minute).
+	if strings.HasSuffix(unit, "s") && unit != "s" {
+		unit = strings.TrimSuffix(unit, "s")
+	}
+	return &domain.RelativeOffset{Amount: amount, Unit: unit}, nil
 }

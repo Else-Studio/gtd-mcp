@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"errors"
@@ -25,7 +25,7 @@ func TestCascadeRestore_PropagatesSaveError(t *testing.T) {
 	taskRepo := &failAfterNTaskRepo{failAfter: 0, err: errors.New("disk full")}
 
 	engine := sqlite.NewSyncEngine(db, taskRepo, projRepo, nil, nil)
-	appCtx := &appContext{
+	appCtx := &Context{
 		db:          db,
 		syncEngine:  engine,
 		taskRepo:    taskRepo,

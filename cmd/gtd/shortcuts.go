@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,11 +17,11 @@ Unprocessed tasks that need clarification. Default returns a JSON list of IDs. S
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		ids, err := appCtx.taskQuery.ListInboxTasks(context.Background())
+		ids, err := appCtx.ListInboxIDs(context.Background())
 		if err != nil {
-			return fmt.Errorf("list inbox: %w", err)
+			return err
 		}
 
 		printSuccess(resolveTasks(appCtx, ids))
@@ -42,12 +41,11 @@ task list next (--area, --area-id, --project, --project-id, --context,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		filter := appCtx.resolveTaskListFilter(taskListFilterFromCmd(cmd))
-		ids, err := appCtx.taskQuery.ListNextTasks(context.Background(), filter)
+		ids, err := appCtx.ListNextIDs(context.Background(), taskListFilterFromCmd(cmd))
 		if err != nil {
-			return fmt.Errorf("list next: %w", err)
+			return err
 		}
 
 		printSuccess(resolveTasks(appCtx, ids))
@@ -65,11 +63,11 @@ Used during Reflect/Weekly Review to identify outcomes requiring a new action st
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		ids, err := appCtx.taskQuery.ListStalledProjects(context.Background())
+		ids, err := appCtx.ListStalledProjectIDs(context.Background())
 		if err != nil {
-			return fmt.Errorf("list stalled: %w", err)
+			return err
 		}
 
 		printSuccess(resolveProjects(appCtx, ids))
@@ -91,12 +89,11 @@ archived tasks are excluded. Default returns a JSON list of task IDs. Supports
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		filter := appCtx.resolveTaskListFilter(taskListFilterFromCmd(cmd))
-		ids, err := appCtx.taskQuery.ListAgendaTasks(context.Background(), time.Now(), filter)
+		ids, err := appCtx.ListAgendaIDs(context.Background(), time.Now(), taskListFilterFromCmd(cmd))
 		if err != nil {
-			return fmt.Errorf("list agenda: %w", err)
+			return err
 		}
 
 		printSuccess(resolveTasks(appCtx, ids))

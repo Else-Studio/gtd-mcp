@@ -1,10 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"sort"
-
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +22,7 @@ Contexts appear when assigned to tasks; there is no separate create command.`,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		items, err := appCtx.ListContexts()
 		if err != nil {
@@ -35,17 +31,6 @@ Contexts appear when assigned to tasks; there is no separate create command.`,
 		printSuccess(items)
 		return nil
 	},
-}
-
-// ListContexts returns sorted distinct contexts from the entity catalog.
-func (c *appContext) ListContexts() ([]string, error) {
-	catalog, err := c.taskQuery.GetEntityCatalog(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("get catalog: %w", err)
-	}
-	out := append([]string(nil), catalog.Contexts...)
-	sort.Strings(out)
-	return out, nil
 }
 
 func init() {

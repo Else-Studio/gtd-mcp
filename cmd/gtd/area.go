@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/spf13/cobra"
+	"gtd/internal/app"
 )
 
 var areaCmd = &cobra.Command{
@@ -21,7 +22,7 @@ var areaAddCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		area, err := appCtx.CreateArea(args[0])
 		if err != nil {
@@ -42,7 +43,7 @@ var areaDeleteCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		area, err := appCtx.DeleteArea(args[0])
 		if err != nil {
@@ -63,7 +64,7 @@ Defaults to JSON. When --plain is specified, prints an ASCII table (ID, NAME).`,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		activeAreas, err := appCtx.ListActiveAreas()
 		if err != nil {
@@ -84,10 +85,10 @@ var areaUpdateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		name, _ := cmd.Flags().GetString("name")
-		area, err := appCtx.UpdateArea(args[0], UpdateAreaOptions{Name: name})
+		area, err := appCtx.UpdateArea(args[0], app.UpdateAreaOptions{Name: name})
 		if err != nil {
 			return err
 		}
@@ -106,7 +107,7 @@ var areaRestoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		area, err := appCtx.RestoreArea(args[0])
 		if err != nil {

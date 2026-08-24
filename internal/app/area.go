@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 )
 
 // CreateArea creates a new Area of Focus with the given name.
-func (c *appContext) CreateArea(name string) (*domain.Area, error) {
+func (c *Context) CreateArea(name string) (*domain.Area, error) {
 	area := &domain.Area{
 		ID:   uuid.New().String(),
 		Name: name,
@@ -27,7 +27,7 @@ type UpdateAreaOptions struct {
 }
 
 // UpdateArea loads an area, applies name change if set, and persists.
-func (c *appContext) UpdateArea(id string, opts UpdateAreaOptions) (*domain.Area, error) {
+func (c *Context) UpdateArea(id string, opts UpdateAreaOptions) (*domain.Area, error) {
 	area, err := c.areaRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("area not found: %w", err)
@@ -45,7 +45,7 @@ func (c *appContext) UpdateArea(id string, opts UpdateAreaOptions) (*domain.Area
 }
 
 // DeleteArea soft-deletes an area and cascades soft-delete to child projects and tasks.
-func (c *appContext) DeleteArea(id string) (*domain.Area, error) {
+func (c *Context) DeleteArea(id string) (*domain.Area, error) {
 	area, err := c.areaRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("area not found: %w", err)
@@ -91,7 +91,7 @@ func (c *appContext) DeleteArea(id string) (*domain.Area, error) {
 }
 
 // RestoreArea restores a soft-deleted area and cascades restore to child projects and tasks.
-func (c *appContext) RestoreArea(id string) (*domain.Area, error) {
+func (c *Context) RestoreArea(id string) (*domain.Area, error) {
 	area, err := c.areaRepo.Get(id)
 	if err != nil {
 		return nil, fmt.Errorf("area not found: %w", err)
@@ -136,7 +136,7 @@ func (c *appContext) RestoreArea(id string) (*domain.Area, error) {
 }
 
 // ListActiveAreas returns non-deleted areas.
-func (c *appContext) ListActiveAreas() ([]*domain.Area, error) {
+func (c *Context) ListActiveAreas() ([]*domain.Area, error) {
 	areas, err := c.areaRepo.List()
 	if err != nil {
 		return nil, fmt.Errorf("list areas: %w", err)

@@ -1,12 +1,10 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gtd/internal/app"
 	"gtd/internal/domain"
 )
 
@@ -54,9 +52,9 @@ Returns a JSON task object containing fields like id, title, status, contexts, t
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		opts := CreateTaskOptions{Text: strings.Join(args, " ")}
+		opts := app.CreateTaskOptions{Text: strings.Join(args, " ")}
 		opts.ProjectID, _ = cmd.Flags().GetString("project-id")
 		opts.AreaID, _ = cmd.Flags().GetString("area-id")
 		opts.AreaName, _ = cmd.Flags().GetString("area")
@@ -102,41 +100,41 @@ Example:
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
-		opts := UpdateTaskOptions{Text: text}
+		opts := app.UpdateTaskOptions{Text: text}
 		opts.Status, _ = cmd.Flags().GetString("status")
 		if cmd.Flags().Changed("project-id") {
 			v, _ := cmd.Flags().GetString("project-id")
-			opts.ProjectID = optionalString{Set: true, Value: v}
+			opts.ProjectID = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("area-id") {
 			v, _ := cmd.Flags().GetString("area-id")
-			opts.AreaID = optionalString{Set: true, Value: v}
+			opts.AreaID = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("area") {
 			v, _ := cmd.Flags().GetString("area")
-			opts.AreaName = optionalString{Set: true, Value: v}
+			opts.AreaName = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("assigned-to") {
 			v, _ := cmd.Flags().GetString("assigned-to")
-			opts.AssignedTo = optionalString{Set: true, Value: v}
+			opts.AssignedTo = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("start-offset") {
 			v, _ := cmd.Flags().GetString("start-offset")
-			opts.StartOffset = optionalString{Set: true, Value: v}
+			opts.StartOffset = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("recurrence") {
 			v, _ := cmd.Flags().GetString("recurrence")
-			opts.Recurrence = optionalString{Set: true, Value: v}
+			opts.Recurrence = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("contexts") {
 			v, _ := cmd.Flags().GetString("contexts")
-			opts.Contexts = optionalString{Set: true, Value: v}
+			opts.Contexts = app.OptionalString{Set: true, Value: v}
 		}
 		if cmd.Flags().Changed("tags") {
 			v, _ := cmd.Flags().GetString("tags")
-			opts.Tags = optionalString{Set: true, Value: v}
+			opts.Tags = app.OptionalString{Set: true, Value: v}
 		}
 
 		result, err := appCtx.UpdateTask(id, opts)
@@ -175,67 +173,6 @@ func decorateTask(t *domain.Task, invalidDateCommands []string) interface{} {
 	return out
 }
 
-// rejectArchivedProject blocks task create/update when the container project is archived.
-func rejectArchivedProject(appCtx *appContext, projectID *string) error {
-	if projectID == nil || *projectID == "" {
-		return nil
-	}
-	project, err := appCtx.projectRepo.Get(*projectID)
-	if err != nil {
-		return nil // missing project is not this rule's concern
-	}
-	if project.Status == domain.ProjectStatusArchived {
-		return fmt.Errorf("%w: cannot create or update tasks under archived project %q", domain.ErrValidation, project.Title)
-	}
-	return nil
-}
-
-// rejectArchivedProjectByTitle blocks auto-creating a twin project when an archived
-// project with the same title already exists (catalog omits archived, so NLP would
-// otherwise spawn a new active project with the same name).
-func rejectArchivedProjectByTitle(appCtx *appContext, title string) error {
-	projects, err := appCtx.projectRepo.List()
-	if err != nil {
-		return fmt.Errorf("list projects: %w", err)
-	}
-	for _, p := range projects {
-		if p.DeletedAt != nil {
-			continue
-		}
-		if p.Title == title && p.Status == domain.ProjectStatusArchived {
-			return fmt.Errorf("%w: cannot create or update tasks under archived project %q", domain.ErrValidation, title)
-		}
-	}
-	return nil
-}
-
-// parseStartOffset accepts either JSON ({"amount":-1,"unit":"day"}) or a human
-// form like "-1 day" / "-30 minute".
-func parseStartOffset(s string) (*domain.RelativeOffset, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, nil
-	}
-	var offset domain.RelativeOffset
-	if err := json.Unmarshal([]byte(s), &offset); err == nil && offset.Unit != "" {
-		return &offset, nil
-	}
-	parts := strings.Fields(s)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("expected JSON or \"<amount> <unit>\" (e.g. \"-1 day\"), got %q", s)
-	}
-	amount, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return nil, fmt.Errorf("invalid amount %q: %w", parts[0], err)
-	}
-	unit := strings.ToLower(parts[1])
-	// Normalize plural units (days → day, minutes → minute).
-	if strings.HasSuffix(unit, "s") && unit != "s" {
-		unit = strings.TrimSuffix(unit, "s")
-	}
-	return &domain.RelativeOffset{Amount: amount, Unit: unit}, nil
-}
-
 var taskDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a task",
@@ -247,7 +184,7 @@ Soft-deleted tasks are excluded from normal list commands but remain in history.
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		task, err := appCtx.DeleteTask(args[0])
 		if err != nil {
@@ -268,7 +205,7 @@ var taskRestoreCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		task, err := appCtx.RestoreTask(args[0])
 		if err != nil {
@@ -291,7 +228,7 @@ By default, returns a JSON list of task IDs. When --plain is specified, returns 
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		status := ""
 		if len(args) > 0 {
@@ -317,7 +254,7 @@ Resets status to 'next' and clears completedAt so the clone is actionable.`,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		clone, err := appCtx.DuplicateTask(args[0])
 		if err != nil {
@@ -341,7 +278,7 @@ Clears the task's area association (container exclusivity). The task is preserve
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		result, err := appCtx.PromoteTask(args[0], args[1])
 		if err != nil {
@@ -356,8 +293,8 @@ Clears the task's area association (container exclusivity). The task is preserve
 }
 
 // taskListFilterFromCmd maps list/shortcut flags onto TaskListFilter.
-func taskListFilterFromCmd(cmd *cobra.Command) TaskListFilter {
-	f := TaskListFilter{}
+func taskListFilterFromCmd(cmd *cobra.Command) app.TaskListFilter {
+	f := app.TaskListFilter{}
 	f.AreaID, _ = cmd.Flags().GetString("area-id")
 	f.AreaName, _ = cmd.Flags().GetString("area")
 	f.ProjectID, _ = cmd.Flags().GetString("project-id")

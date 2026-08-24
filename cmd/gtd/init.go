@@ -1,12 +1,10 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"gtd/internal/persistence/sqlite"
+	"gtd/internal/app"
 )
 
 var initCmd = &cobra.Command{
@@ -21,34 +19,9 @@ Also creates an empty config.yml placeholder (not loaded in V1 — effective con
 			return err
 		}
 
-		dirs := []string{
-			"tasks",
-			"projects",
-			"areas",
-			"people",
+		if err := app.Init(gtdDir, filepath.Join(gtdDir, "index.db")); err != nil {
+			return err
 		}
-
-		for _, d := range dirs {
-			dirPath := filepath.Join(gtdDir, d)
-			if err := os.MkdirAll(dirPath, 0755); err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", d, err)
-			}
-		}
-
-		configFile := filepath.Join(gtdDir, "config.yml")
-		if _, err := os.Stat(configFile); os.IsNotExist(err) {
-			if err := os.WriteFile(configFile, []byte(""), 0644); err != nil {
-				return fmt.Errorf("failed to create config file: %w", err)
-			}
-		}
-
-		dbFile := filepath.Join(gtdDir, "index.db")
-		dsn := fmt.Sprintf("file:%s?_journal=WAL", filepath.ToSlash(dbFile))
-		db, err := sqlite.NewDB(dsn)
-		if err != nil {
-			return fmt.Errorf("failed to initialize sqlite db: %w", err)
-		}
-		defer db.Close()
 
 		printSuccess(map[string]string{
 			"workspace": gtdDir,

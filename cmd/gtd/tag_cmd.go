@@ -1,10 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"sort"
-
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +22,7 @@ Tags appear when assigned to tasks; there is no separate create command.`,
 		if err != nil {
 			return err
 		}
-		defer appCtx.cleanup()
+		defer appCtx.Close()
 
 		items, err := appCtx.ListTags()
 		if err != nil {
@@ -35,17 +31,6 @@ Tags appear when assigned to tasks; there is no separate create command.`,
 		printSuccess(items)
 		return nil
 	},
-}
-
-// ListTags returns sorted distinct tags from the entity catalog.
-func (c *appContext) ListTags() ([]string, error) {
-	catalog, err := c.taskQuery.GetEntityCatalog(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("get catalog: %w", err)
-	}
-	out := append([]string(nil), catalog.Tags...)
-	sort.Strings(out)
-	return out, nil
 }
 
 func init() {
