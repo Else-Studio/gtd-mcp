@@ -210,17 +210,15 @@ func TestGoldens_OpenRebuild(t *testing.T) {
 
 func TestInvoke_UnknownOp_Validation(t *testing.T) {
 	g := newGtd(t)
-	for _, op := range []string{"nope", "add", "complete", "undoComplete"} {
-		env := invoke(t, g, map[string]string{"op": op})
-		if env["ok"] != false {
-			t.Errorf("op %q: ok = %v, want false", op, env["ok"])
-		}
-		if errMap(t, env)["code"] != "validation" {
-			t.Errorf("op %q: error.code = %v, want validation", op, errMap(t, env)["code"])
-		}
+	env := invoke(t, g, map[string]string{"op": "nope"})
+	if env["ok"] != false {
+		t.Errorf("op %q: ok = %v, want false", "nope", env["ok"])
+	}
+	if errMap(t, env)["code"] != "validation" {
+		t.Errorf("op %q: error.code = %v, want validation", "nope", errMap(t, env)["code"])
 	}
 
-	env := invoke(t, g, `{`)
+	env = invoke(t, g, `{`)
 	if env["ok"] != false {
 		t.Errorf("invalid JSON: ok = %v, want false", env["ok"])
 	}
@@ -247,18 +245,19 @@ func tempWorkspace(t *testing.T) (ws, indexPath string) {
 }
 
 const (
-	kitchenProjectID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	homeAreaID       = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	idInboxKitchen   = "11111111-1111-4111-8111-111111111111"
-	idNextOffice     = "22222222-2222-4222-8222-222222222222"
-	idWaitingProj    = "33333333-3333-4333-8333-333333333333"
-	idWaitingLoose   = "44444444-4444-4444-8444-444444444444"
-	idDoneProj       = "55555555-5555-4555-8555-555555555555"
-	idInboxHome      = "66666666-6666-4666-8666-666666666666"
-	idRefProj        = "77777777-7777-4777-8777-777777777777"
-	idDeletedOffice  = "88888888-8888-4888-8888-888888888888"
-	idDuePast        = "99999999-9999-4999-8999-999999999999"
-	idDueTomorrow    = "abababab-abab-4bab-8bab-abababababab"
+	kitchenProjectID  = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	homeAreaID        = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	idInboxKitchen    = "11111111-1111-4111-8111-111111111111"
+	idNextOffice      = "22222222-2222-4222-8222-222222222222"
+	idWaitingProj     = "33333333-3333-4333-8333-333333333333"
+	idWaitingLoose    = "44444444-4444-4444-8444-444444444444"
+	idDoneProj        = "55555555-5555-4555-8555-555555555555"
+	idInboxHome       = "66666666-6666-4666-8666-666666666666"
+	idRefProj         = "77777777-7777-4777-8777-777777777777"
+	idDeletedOffice   = "88888888-8888-4888-8888-888888888888"
+	idDuePast         = "99999999-9999-4999-8999-999999999999"
+	idDueTomorrow     = "abababab-abab-4bab-8bab-abababababab"
+	idCompleteFixture = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 )
 
 func TestInvoke_ListInbox_HydratesBelongsAndProjectTitle(t *testing.T) {
@@ -483,6 +482,180 @@ func TestGoldens_ListCatalog(t *testing.T) {
 	assertContainsKeys(t, catalogEnv, unmarshalMap(t, readGolden(t, "catalog_response.json")), "")
 }
 
+func TestInvoke_Add_NLPOfficeLandsInInbox(t *testing.T) {
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+	openOnly(t, g, ws, indexPath)
+
+	env := invoke(t, g, map[string]string{"op": "add", "text": "Buy milk @office"})
+	wantOK(t, env)
+	data := dataMap(t, env)
+	if data["status"] != "inbox" {
+		t.Errorf("status = %v, want inbox", data["status"])
+	}
+	if !containsString(asStrings(t, data["contexts"]), "@office") {
+		t.Errorf("contexts = %v, want to contain @office", data["contexts"])
+	}
+	if data["belongs"] != "inbox" {
+		t.Errorf("belongs = %v, want inbox", data["belongs"])
+	}
+	id, _ := data["id"].(string)
+	if id == "" {
+		t.Fatal("expected created task id")
+	}
+	path := filepath.Join(ws, "tasks", "tasks", id+".md")
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected markdown at %s: %v", path, err)
+	}
+}
+
+func TestInvoke_ListInbox_IncludesAddedTask(t *testing.T) {
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+	openOnly(t, g, ws, indexPath)
+
+	addEnv := invoke(t, g, map[string]string{"op": "add", "text": "Buy milk @office"})
+	wantOK(t, addEnv)
+	id, _ := dataMap(t, addEnv)["id"].(string)
+	if id == "" {
+		t.Fatal("expected created task id")
+	}
+
+	listEnv := invoke(t, g, map[string]string{"op": "list", "view": "inbox"})
+	wantOK(t, listEnv)
+	if !containsString(dataTaskIDs(t, listEnv), id) {
+		t.Fatalf("inbox ids = %v, want to contain %s", dataTaskIDs(t, listEnv), id)
+	}
+}
+
+func TestInvoke_CompleteThenUndo_RestoresStatusAndFile(t *testing.T) {
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+	openOnly(t, g, ws, indexPath)
+
+	addEnv := invoke(t, g, map[string]string{"op": "add", "text": "Buy milk @office"})
+	wantOK(t, addEnv)
+	id, _ := dataMap(t, addEnv)["id"].(string)
+	if id == "" {
+		t.Fatal("expected created task id")
+	}
+
+	completeEnv := invoke(t, g, map[string]string{"op": "complete", "id": id})
+	wantOK(t, completeEnv)
+	completeData := dataMap(t, completeEnv)
+	if completeData["status"] != "done" {
+		t.Errorf("complete status = %v, want done", completeData["status"])
+	}
+	if completeData["previousStatus"] != "inbox" {
+		t.Errorf("previousStatus = %v, want inbox", completeData["previousStatus"])
+	}
+	done := loadOpenWiredTask(t, ws, id)
+	if done.Status != domain.TaskStatusDone {
+		t.Errorf("file status after complete = %s, want done", done.Status)
+	}
+	if done.CompletedAt == nil {
+		t.Error("file completedAt after complete is nil, want set")
+	}
+
+	undoEnv := invoke(t, g, map[string]string{"op": "undoComplete", "id": id, "status": "inbox"})
+	wantOK(t, undoEnv)
+	undoData := dataMap(t, undoEnv)
+	if undoData["status"] != "inbox" {
+		t.Errorf("undo status = %v, want inbox", undoData["status"])
+	}
+	restored := loadOpenWiredTask(t, ws, id)
+	if restored.Status != domain.TaskStatusInbox {
+		t.Errorf("file status after undo = %s, want inbox", restored.Status)
+	}
+	if restored.CompletedAt != nil {
+		t.Errorf("file completedAt after undo = %v, want nil", restored.CompletedAt)
+	}
+}
+
+func TestInvoke_Complete_NotFound(t *testing.T) {
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+	openOnly(t, g, ws, indexPath)
+
+	env := invoke(t, g, map[string]string{"op": "complete", "id": "00000000-0000-4000-8000-000000000000"})
+	if env["ok"] != false {
+		t.Fatalf("ok = %v, want false", env["ok"])
+	}
+	if errMap(t, env)["code"] != "not_found" {
+		t.Fatalf("error.code = %v, want not_found", errMap(t, env)["code"])
+	}
+}
+
+func TestInvoke_Add_EmptyText_Validation(t *testing.T) {
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+	openOnly(t, g, ws, indexPath)
+
+	for _, text := range []string{"", "   "} {
+		env := invoke(t, g, map[string]string{"op": "add", "text": text})
+		if env["ok"] != false {
+			t.Errorf("text %q: ok = %v, want false", text, env["ok"])
+		}
+		if errMap(t, env)["code"] != "validation" {
+			t.Errorf("text %q: error.code = %v, want validation", text, errMap(t, env)["code"])
+		}
+	}
+}
+
+func TestGoldens_AddCompleteUndo(t *testing.T) {
+	encodedAdd, err := json.Marshal(map[string]string{"op": "add", "text": "Buy milk @office #errand"})
+	if err != nil {
+		t.Fatalf("marshal add request: %v", err)
+	}
+	if !reflect.DeepEqual(unmarshalMap(t, encodedAdd), unmarshalMap(t, readGolden(t, "add_request.json"))) {
+		t.Errorf("add request does not match testdata/add_request.json")
+	}
+
+	encodedComplete, err := json.Marshal(map[string]string{"op": "complete", "id": idCompleteFixture})
+	if err != nil {
+		t.Fatalf("marshal complete request: %v", err)
+	}
+	if !reflect.DeepEqual(unmarshalMap(t, encodedComplete), unmarshalMap(t, readGolden(t, "complete_request.json"))) {
+		t.Errorf("complete request does not match testdata/complete_request.json")
+	}
+
+	encodedUndo, err := json.Marshal(map[string]string{"op": "undoComplete", "id": idCompleteFixture, "status": "inbox"})
+	if err != nil {
+		t.Fatalf("marshal undoComplete request: %v", err)
+	}
+	if !reflect.DeepEqual(unmarshalMap(t, encodedUndo), unmarshalMap(t, readGolden(t, "undo_complete_request.json"))) {
+		t.Errorf("undoComplete request does not match testdata/undo_complete_request.json")
+	}
+
+	encodedInbox, err := json.Marshal(map[string]string{"op": "list", "view": "inbox"})
+	if err != nil {
+		t.Fatalf("marshal list inbox: %v", err)
+	}
+	if !reflect.DeepEqual(unmarshalMap(t, encodedInbox), unmarshalMap(t, readGolden(t, "list_inbox_request.json"))) {
+		t.Errorf("list inbox request does not match testdata/list_inbox_request.json")
+	}
+
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+	writeTask(t, ws, &domain.Task{
+		ID:       idCompleteFixture,
+		Title:    "Buy milk",
+		Status:   domain.TaskStatusInbox,
+		Tags:     []string{"#errand"},
+		Contexts: []string{"@office"},
+	})
+	openOnly(t, g, ws, indexPath)
+
+	addEnv := invoke(t, g, map[string]string{"op": "add", "text": "Buy milk @office #errand"})
+	assertContainsKeys(t, addEnv, unmarshalMap(t, readGolden(t, "add_response.json")), "")
+
+	completeEnv := invoke(t, g, map[string]string{"op": "complete", "id": idCompleteFixture})
+	assertContainsKeys(t, completeEnv, unmarshalMap(t, readGolden(t, "complete_response.json")), "")
+
+	undoEnv := invoke(t, g, map[string]string{"op": "undoComplete", "id": idCompleteFixture, "status": "inbox"})
+	assertContainsKeys(t, undoEnv, unmarshalMap(t, readGolden(t, "undo_complete_response.json")), "")
+}
+
 func writeInboxTask(t *testing.T, ws, id, title string) string {
 	t.Helper()
 	writeTask(t, ws, &domain.Task{
@@ -581,12 +754,27 @@ func writeContextUnionFixtures(t *testing.T, ws string) {
 
 func openRebuild(t *testing.T, g *Gtd, ws, indexPath string) {
 	t.Helper()
+	openOnly(t, g, ws, indexPath)
+	wantOK(t, invoke(t, g, map[string]string{"op": "rebuild"}))
+}
+
+func openOnly(t *testing.T, g *Gtd, ws, indexPath string) {
+	t.Helper()
 	wantOK(t, invoke(t, g, map[string]string{
 		"op":            "open",
 		"workspacePath": ws,
 		"indexPath":     indexPath,
 	}))
-	wantOK(t, invoke(t, g, map[string]string{"op": "rebuild"}))
+}
+
+func loadOpenWiredTask(t *testing.T, ws, id string) *domain.Task {
+	t.Helper()
+	repo := fs.NewTaskRepository(filepath.Join(ws, "tasks"))
+	task, err := repo.Get(id)
+	if err != nil {
+		t.Fatalf("GetTask %s: %v", id, err)
+	}
+	return task
 }
 
 func invoke(t *testing.T, g *Gtd, req interface{}) map[string]interface{} {

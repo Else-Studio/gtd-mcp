@@ -25,8 +25,12 @@ func (g *Gtd) Invoke(req string) string {
 		return g.list(r)
 	case "catalog":
 		return g.catalog()
-	case "add", "complete", "undoComplete":
-		return encodeFail("validation", "op "+r.Op+" is not implemented")
+	case "add":
+		return g.add(r)
+	case "complete":
+		return g.complete(r)
+	case "undoComplete":
+		return g.undoComplete(r)
 	default:
 		return encodeFail("validation", "unknown op: "+r.Op)
 	}

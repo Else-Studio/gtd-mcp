@@ -9,17 +9,16 @@ type hydratedTask struct {
 	Belongs      string `json:"belongs"`
 }
 
-func (g *Gtd) hydrateIDs(ids []string) ([]hydratedTask, error) {
-	out := []hydratedTask{}
+func (g *Gtd) catalogTitles() (projects, areas map[string]string, err error) {
+	projects = map[string]string{}
+	areas = map[string]string{}
 	if g == nil || g.ctx == nil {
-		return out, nil
+		return projects, areas, nil
 	}
 	cat, err := g.ctx.EntityCatalog()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	projects := map[string]string{}
-	areas := map[string]string{}
 	if cat != nil {
 		for _, p := range cat.Projects {
 			projects[p.ID] = p.Title
@@ -27,6 +26,18 @@ func (g *Gtd) hydrateIDs(ids []string) ([]hydratedTask, error) {
 		for _, a := range cat.Areas {
 			areas[a.ID] = a.Name
 		}
+	}
+	return projects, areas, nil
+}
+
+func (g *Gtd) hydrateIDs(ids []string) ([]hydratedTask, error) {
+	out := []hydratedTask{}
+	if g == nil || g.ctx == nil {
+		return out, nil
+	}
+	projects, areas, err := g.catalogTitles()
+	if err != nil {
+		return nil, err
 	}
 	for _, id := range ids {
 		t, err := g.ctx.GetTask(id)
@@ -36,6 +47,14 @@ func (g *Gtd) hydrateIDs(ids []string) ([]hydratedTask, error) {
 		out = append(out, hydrateTask(t, projects, areas))
 	}
 	return out, nil
+}
+
+func (g *Gtd) hydratePersisted(t *domain.Task) (hydratedTask, error) {
+	projects, areas, err := g.catalogTitles()
+	if err != nil {
+		return hydratedTask{}, err
+	}
+	return hydrateTask(t, projects, areas), nil
 }
 
 func hydrateTask(t *domain.Task, projects, areas map[string]string) hydratedTask {
