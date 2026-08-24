@@ -17,6 +17,8 @@ type request struct {
 	Op            string `json:"op"`
 	WorkspacePath string `json:"workspacePath"`
 	IndexPath     string `json:"indexPath"`
+	View          string `json:"view"`
+	Context       string `json:"context"`
 }
 
 func decodeRequest(req string) (request, error) {

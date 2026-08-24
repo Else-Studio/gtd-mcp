@@ -33,6 +33,15 @@ func (c *Context) ListAgendaIDs(ctx context.Context, now time.Time, f TaskListFi
 	return ids, nil
 }
 
+// ListContextUnionIDs returns inbox/next plus projected in-project tasks for a stored context (@office).
+func (c *Context) ListContextUnionIDs(ctx context.Context, context string) ([]string, error) {
+	ids, err := c.taskQuery.ListContextUnionIDs(ctx, context)
+	if err != nil {
+		return nil, fmt.Errorf("list context union: %w", err)
+	}
+	return ids, nil
+}
+
 // ListStalledProjectIDs returns IDs of active projects with zero next actions.
 func (c *Context) ListStalledProjectIDs(ctx context.Context) ([]string, error) {
 	ids, err := c.taskQuery.ListStalledProjects(ctx)

@@ -242,6 +242,40 @@ func (q *TaskQuery) ListInboxTasks(ctx context.Context) ([]string, error) {
 	return q.ListTasksByStatus(ctx, string(domain.TaskStatusInbox), nil)
 }
 
+// ListContextUnionIDs returns inbox/next tasks in context plus in-project tasks
+// that are not done/archived/reference. No project-status join (unlike next-action lists).
+func (q *TaskQuery) ListContextUnionIDs(ctx context.Context, context string) ([]string, error) {
+	query := `
+		SELECT id FROM tasks
+		WHERE deletedAt IS NULL
+		  AND EXISTS (SELECT 1 FROM json_each(contexts) WHERE value = ?)
+		  AND (
+		    status IN ('inbox', 'next')
+		    OR (
+		      projectId IS NOT NULL
+		      AND status NOT IN ('done', 'archived', 'reference')
+		    )
+		  )
+	`
+	query += DefaultSortSQL()
+
+	rows, err := q.db.QueryContext(ctx, query, context)
+	if err != nil {
+		return nil, fmt.Errorf("query context union: %w", err)
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListNextTasks is a shortcut for listing all next tasks (optional filters).
 func (q *TaskQuery) ListNextTasks(ctx context.Context, filter *TaskQueryFilter) ([]string, error) {
 	return q.ListTasksByStatus(ctx, string(domain.TaskStatusNext), filter)

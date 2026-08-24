@@ -328,3 +328,59 @@ func TestTaskQuery_ListNextTasks_ProjectInheritance(t *testing.T) {
 		t.Error("expected next task under deleted project to be excluded")
 	}
 }
+
+func TestListContextUnionIDs_InboxNextAndProjected(t *testing.T) {
+	db, err := sqlite.NewDB("file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	engine := sqlite.NewSyncEngine(db, nil, nil, nil, nil)
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	projID := "proj-kitchen"
+	office := []string{"@office"}
+	home := []string{"@home"}
+	deletedAt := now.Add(-time.Hour)
+
+	if err := engine.SyncProject(context.Background(), &domain.Project{
+		ID:        projID,
+		Title:     "Kitchen",
+		Status:    domain.ProjectStatusActive,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("sync project: %v", err)
+	}
+
+	seed := []*domain.Task{
+		{ID: "inbox-office", Title: "Inbox office", Status: domain.TaskStatusInbox, Contexts: office, CreatedAt: now, UpdatedAt: now},
+		{ID: "next-office", Title: "Next office", Status: domain.TaskStatusNext, Contexts: office, CreatedAt: now.Add(time.Second), UpdatedAt: now},
+		{ID: "waiting-proj-office", Title: "Waiting projected", Status: domain.TaskStatusWaiting, ProjectID: &projID, Contexts: office, CreatedAt: now.Add(2 * time.Second), UpdatedAt: now},
+		{ID: "waiting-noproj-office", Title: "Waiting loose", Status: domain.TaskStatusWaiting, Contexts: office, CreatedAt: now.Add(3 * time.Second), UpdatedAt: now},
+		{ID: "done-proj-office", Title: "Done projected", Status: domain.TaskStatusDone, ProjectID: &projID, Contexts: office, CreatedAt: now.Add(4 * time.Second), UpdatedAt: now},
+		{ID: "inbox-home", Title: "Inbox home", Status: domain.TaskStatusInbox, Contexts: home, CreatedAt: now.Add(5 * time.Second), UpdatedAt: now},
+		{ID: "ref-proj-office", Title: "Ref projected", Status: domain.TaskStatusReference, ProjectID: &projID, Contexts: office, CreatedAt: now.Add(6 * time.Second), UpdatedAt: now},
+		{ID: "deleted-office", Title: "Deleted office", Status: domain.TaskStatusInbox, Contexts: office, DeletedAt: &deletedAt, CreatedAt: now.Add(7 * time.Second), UpdatedAt: now},
+	}
+	for _, task := range seed {
+		if err := engine.SyncTask(context.Background(), task, now); err != nil {
+			t.Fatalf("sync %s: %v", task.ID, err)
+		}
+	}
+
+	q := sqlite.NewTaskQuery(db)
+	ids, err := q.ListContextUnionIDs(context.Background(), "@office")
+	if err != nil {
+		t.Fatalf("ListContextUnionIDs: %v", err)
+	}
+	want := []string{"inbox-office", "next-office", "waiting-proj-office"}
+	if len(ids) != len(want) {
+		t.Fatalf("got %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Errorf("order[%d] = %s, want %s (full=%v)", i, ids[i], want[i], ids)
+		}
+	}
+}

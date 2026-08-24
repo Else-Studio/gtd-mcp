@@ -21,7 +21,11 @@ func (g *Gtd) Invoke(req string) string {
 		return g.open(r)
 	case "rebuild":
 		return g.rebuild()
-	case "add", "list", "catalog", "complete", "undoComplete":
+	case "list":
+		return g.list(r)
+	case "catalog":
+		return g.catalog()
+	case "add", "complete", "undoComplete":
 		return encodeFail("validation", "op "+r.Op+" is not implemented")
 	default:
 		return encodeFail("validation", "unknown op: "+r.Op)
