@@ -3,6 +3,7 @@ package sqlite
 import (
 	"database/sql"
 	"fmt"
+	"runtime"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 )
@@ -13,6 +14,7 @@ func NewDB(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+	configureAndroidPool(db)
 
 	// Enable foreign keys
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
@@ -27,4 +29,14 @@ func NewDB(dsn string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+// gomobile + sqlite3_dotlk cannot share WAL across pooled connections.
+// Cap the pool before the first Exec so schema and later Sync share one conn.
+func configureAndroidPool(db *sql.DB) {
+	if runtime.GOOS != "android" {
+		return
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"gtd/internal/domain"
@@ -137,10 +138,25 @@ func (s *SyncEngine) Sync(ctx context.Context, now time.Time) (*SyncReport, erro
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := commitTx(tx); err != nil {
 		return nil, err
 	}
 	return report, nil
+}
+
+func commitTx(tx *sql.Tx) error {
+	err := tx.Commit()
+	if err == nil || isInactiveTransaction(err) {
+		return nil
+	}
+	return err
+}
+
+func isInactiveTransaction(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "no transaction is active")
 }
 
 func appendSoft(report *SyncReport, skipped []string, decodeErrs []error) {
@@ -209,67 +225,20 @@ func listPeople(repo domain.PersonRepository) ([]*domain.Person, []string, []err
 }
 
 func (s *SyncEngine) SyncTask(ctx context.Context, t *domain.Task, now time.Time) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if _, err := tx.Exec("DELETE FROM tasks WHERE id = ?", t.ID); err != nil {
-		return err
-	}
-
 	NormalizeTaskForLoad(t, now)
-	if err := insertTask(tx, t); err != nil {
-		return err
-	}
-
-	return tx.Commit()
+	return insertTask(s.db, t)
 }
 
 func (s *SyncEngine) SyncProject(ctx context.Context, p *domain.Project) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM projects WHERE id = ?", p.ID); err != nil {
-		return err
-	}
-	if err := insertProject(tx, p); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return insertProject(s.db, p)
 }
 
 func (s *SyncEngine) SyncArea(ctx context.Context, a *domain.Area) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM areas WHERE id = ?", a.ID); err != nil {
-		return err
-	}
-	if err := insertArea(tx, a); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return insertArea(s.db, a)
 }
 
 func (s *SyncEngine) SyncPerson(ctx context.Context, p *domain.Person) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec("DELETE FROM people WHERE id = ?", p.ID); err != nil {
-		return err
-	}
-	if err := insertPerson(tx, p); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return insertPerson(s.db, p)
 }
 
 func NormalizeTaskForLoad(t *domain.Task, now time.Time) {
@@ -299,20 +268,34 @@ func NormalizeTaskForLoad(t *domain.Task, now time.Time) {
 	}
 }
 
-func insertArea(tx *sql.Tx, a *domain.Area) error {
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func insertArea(e execer, a *domain.Area) error {
 	query := `INSERT INTO areas (id, name, color, icon, orderNum, createdAt, updatedAt, deletedAt)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := tx.Exec(query,
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		name=excluded.name, color=excluded.color, icon=excluded.icon,
+		orderNum=excluded.orderNum, createdAt=excluded.createdAt,
+		updatedAt=excluded.updatedAt, deletedAt=excluded.deletedAt`
+	_, err := e.Exec(query,
 		a.ID, a.Name, a.Color, a.Icon, a.OrderNum,
 		timeString(a.CreatedAt), timeString(a.UpdatedAt), timePtrString(a.DeletedAt),
 	)
 	return err
 }
 
-func insertProject(tx *sql.Tx, p *domain.Project) error {
+func insertProject(e execer, p *domain.Project) error {
 	query := `INSERT INTO projects (id, title, status, color, orderNum, tagIds, supportNotes, attachments, dueDate, reviewAt, areaId, areaTitle, createdAt, updatedAt, deletedAt)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	_, err := tx.Exec(query,
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		title=excluded.title, status=excluded.status, color=excluded.color,
+		orderNum=excluded.orderNum, tagIds=excluded.tagIds, supportNotes=excluded.supportNotes,
+		attachments=excluded.attachments, dueDate=excluded.dueDate, reviewAt=excluded.reviewAt,
+		areaId=excluded.areaId, areaTitle=excluded.areaTitle, createdAt=excluded.createdAt,
+		updatedAt=excluded.updatedAt, deletedAt=excluded.deletedAt`
+	_, err := e.Exec(query,
 		p.ID, p.Title, string(p.Status), p.Color, p.OrderNum,
 		jsonString(p.TagIDs), p.SupportNotes, jsonString(p.Attachments),
 		timePtrString(p.DueDate), timePtrString(p.ReviewAt), p.AreaID, p.AreaTitle,
@@ -321,15 +304,27 @@ func insertProject(tx *sql.Tx, p *domain.Project) error {
 	return err
 }
 
-func insertTask(tx *sql.Tx, t *domain.Task) error {
+func insertTask(e execer, t *domain.Task) error {
 	query := `INSERT INTO tasks (
 		id, title, status, priority, energyLevel, assignedTo, startTime, relativeStartOffset,
 		dueDate, recurrence, tags, contexts, description, textDirection, attachments, location,
 		projectId, areaId, orderNum, timeEstimate, timeSpentMinutes, reviewAt, completedAt,
 		createdAt, updatedAt, deletedAt
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		title=excluded.title, status=excluded.status, priority=excluded.priority,
+		energyLevel=excluded.energyLevel, assignedTo=excluded.assignedTo,
+		startTime=excluded.startTime, relativeStartOffset=excluded.relativeStartOffset,
+		dueDate=excluded.dueDate, recurrence=excluded.recurrence, tags=excluded.tags,
+		contexts=excluded.contexts, description=excluded.description,
+		textDirection=excluded.textDirection, attachments=excluded.attachments,
+		location=excluded.location, projectId=excluded.projectId, areaId=excluded.areaId,
+		orderNum=excluded.orderNum, timeEstimate=excluded.timeEstimate,
+		timeSpentMinutes=excluded.timeSpentMinutes, reviewAt=excluded.reviewAt,
+		completedAt=excluded.completedAt, createdAt=excluded.createdAt,
+		updatedAt=excluded.updatedAt, deletedAt=excluded.deletedAt`
 
-	_, err := tx.Exec(query,
+	_, err := e.Exec(query,
 		t.ID, t.Title, string(t.Status), t.Priority, t.EnergyLevel, t.AssignedTo,
 		timePtrString(t.StartTime), jsonString(t.RelativeStartOffset),
 		timePtrString(t.DueDate), jsonString(t.Recurrence),
@@ -341,10 +336,13 @@ func insertTask(tx *sql.Tx, t *domain.Task) error {
 	return err
 }
 
-func insertPerson(tx *sql.Tx, p *domain.Person) error {
+func insertPerson(e execer, p *domain.Person) error {
 	query := `INSERT INTO people (id, name, note, referenceLink, createdAt, updatedAt, deletedAt)
-	VALUES (?, ?, ?, ?, ?, ?, ?)`
-	_, err := tx.Exec(query,
+	VALUES (?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		name=excluded.name, note=excluded.note, referenceLink=excluded.referenceLink,
+		createdAt=excluded.createdAt, updatedAt=excluded.updatedAt, deletedAt=excluded.deletedAt`
+	_, err := e.Exec(query,
 		p.ID, p.Name, p.Note, p.ReferenceLink,
 		timeString(p.CreatedAt), timeString(p.UpdatedAt), timePtrString(p.DeletedAt),
 	)

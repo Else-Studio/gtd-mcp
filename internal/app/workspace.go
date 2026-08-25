@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"gtd/internal/domain"
@@ -33,7 +34,19 @@ type Context struct {
 }
 
 func indexDSN(indexPath string) string {
-	return fmt.Sprintf("file:%s?_journal=WAL", filepath.ToSlash(indexPath))
+	return indexDSNFor(runtime.GOOS, indexPath)
+}
+
+func indexDSNFor(goos, indexPath string) string {
+	path := filepath.ToSlash(indexPath)
+	if goos == "android" {
+		// ncruces ignores mattn-style `_journal=WAL`. WAL + pooled connections
+		// on gomobile/dotlk produces "cannot commit - no transaction is active".
+		// DELETE journal + one conn is the phone path. Do not use EXCLUSIVE
+		// locking: a discarded conn after a failed COMMIT can block the next write.
+		return "file:" + path + "?_pragma=journal_mode(DELETE)&_txlock=immediate"
+	}
+	return "file:" + path + "?_journal=WAL"
 }
 
 // Init creates workspace subdirectories, an empty config.yml if missing, and

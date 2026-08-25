@@ -86,6 +86,51 @@ func TestLoadNormalization(t *testing.T) {
 	}
 }
 
+func TestSyncTask_CompleteExistingRow(t *testing.T) {
+	db, err := sqlite.NewDB("file::memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	engine := sqlite.NewSyncEngine(db, nil, nil, nil, nil)
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	task := &domain.Task{
+		ID:        "complete-me",
+		Title:     "Buy milk",
+		Status:    domain.TaskStatusInbox,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := engine.SyncTask(context.Background(), task, now); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+
+	doneAt := now.Add(time.Hour)
+	task.Status = domain.TaskStatusDone
+	task.UpdatedAt = doneAt
+	task.CompletedAt = &doneAt
+	if err := engine.SyncTask(context.Background(), task, doneAt); err != nil {
+		t.Fatalf("complete sync: %v", err)
+	}
+
+	var status, completedAt string
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*), status, completedAt FROM tasks WHERE id = ?`, task.ID).
+		Scan(&count, &status, &completedAt); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 row after complete, got %d", count)
+	}
+	if status != "done" {
+		t.Fatalf("status = %q, want done", status)
+	}
+	if completedAt == "" {
+		t.Fatal("expected completedAt to be set")
+	}
+}
+
 // 4. Sync Engine Scale: 100 mock Task files on temp disk. Run Sync Engine. Assert DB contains 100 tasks, 0 areas/projects.
 func TestSyncEngineScale(t *testing.T) {
 	tempDir := t.TempDir()

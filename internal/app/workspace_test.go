@@ -4,12 +4,36 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"gtd/internal/domain"
 	"gtd/internal/persistence/fs"
 )
+
+func TestIndexDSNFor_AndroidUsesDeleteJournal(t *testing.T) {
+	got := indexDSNFor("android", "/data/user/0/dev.elsestudio.gtd/files/index.db")
+	if !strings.Contains(got, "journal_mode(DELETE)") {
+		t.Fatalf("android DSN = %s, want DELETE journal", got)
+	}
+	if !strings.Contains(got, "_txlock=immediate") {
+		t.Fatalf("android DSN = %s, want immediate txlock", got)
+	}
+	if strings.Contains(got, "_journal=WAL") {
+		t.Fatalf("android DSN still requests WAL: %s", got)
+	}
+	if strings.Contains(got, "locking_mode(EXCLUSIVE)") {
+		t.Fatalf("android DSN must not use exclusive locking: %s", got)
+	}
+}
+
+func TestIndexDSNFor_CLIKeepsJournalQuery(t *testing.T) {
+	got := indexDSNFor("linux", "/tmp/index.db")
+	if got != "file:/tmp/index.db?_journal=WAL" {
+		t.Fatalf("cli DSN = %s", got)
+	}
+}
 
 func TestInitOpen_IndexCanLiveOutsideWorkspace(t *testing.T) {
 	root := t.TempDir()
