@@ -14,14 +14,15 @@ type apiError struct {
 }
 
 type request struct {
-	Op            string `json:"op"`
-	WorkspacePath string `json:"workspacePath"`
-	IndexPath     string `json:"indexPath"`
-	View          string `json:"view"`
-	Context       string `json:"context"`
-	Text          string `json:"text"`
-	ID            string `json:"id"`
-	Status        string `json:"status"`
+	Op            string  `json:"op"`
+	WorkspacePath string  `json:"workspacePath"`
+	IndexPath     string  `json:"indexPath"`
+	View          string  `json:"view"`
+	Context       string  `json:"context"`
+	Text          string  `json:"text"`
+	ID            string  `json:"id"`
+	Status        string  `json:"status"`
+	Now           *string `json:"now,omitempty"`
 }
 
 func decodeRequest(req string) (request, error) {

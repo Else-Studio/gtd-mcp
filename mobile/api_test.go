@@ -289,7 +289,7 @@ func TestInvoke_ListInbox_HydratesBelongsAndProjectTitle(t *testing.T) {
 	}
 }
 
-func TestInvoke_ListContext_Union(t *testing.T) {
+func TestInvoke_ListContext_ActiveTasks(t *testing.T) {
 	g := newGtd(t)
 	ws, indexPath := tempWorkspace(t)
 	writeContextUnionFixtures(t, ws)
@@ -298,23 +298,85 @@ func TestInvoke_ListContext_Union(t *testing.T) {
 	env := invoke(t, g, map[string]string{"op": "list", "view": "context", "context": "@office"})
 	wantOK(t, env)
 	ids := dataTaskIDs(t, env)
-	want := []string{idInboxKitchen, idNextOffice, idWaitingProj}
+	want := []string{idInboxKitchen, idNextOffice, idWaitingProj, idWaitingLoose, idRefProj}
 	if !reflect.DeepEqual(ids, want) {
-		t.Fatalf("context union ids = %v, want %v", ids, want)
+		t.Fatalf("context active task ids = %v, want %v", ids, want)
 	}
 
 	foundProjected := false
+	foundLoose := false
 	for _, task := range dataTasks(t, env) {
 		belongs, _ := task["belongs"].(string)
 		if strings.HasPrefix(belongs, "project:") {
 			foundProjected = true
-			break
+		}
+		if task["id"] == idWaitingLoose {
+			foundLoose = true
 		}
 	}
 	if !foundProjected {
 		t.Fatal("expected a projected task with belongs starting project:")
 	}
+	if !foundLoose {
+		t.Fatal("expected loose task with context to be included")
+	}
 }
+
+func TestInvoke_ListAgenda_NowTimestamp(t *testing.T) {
+	g := newGtd(t)
+	ws, indexPath := tempWorkspace(t)
+
+	t1 := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	t3 := time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC)
+
+	idEarly := "10101010-1010-4010-8010-101010101010"
+	idMid := "20202020-2020-4020-8020-202020202020"
+	idLate := "30303030-3030-4030-8030-303030303030"
+
+	writeTask(t, ws, &domain.Task{
+		ID:      idEarly,
+		Title:   "Early Task",
+		Status:  domain.TaskStatusNext,
+		DueDate: &t1,
+	})
+	writeTask(t, ws, &domain.Task{
+		ID:      idMid,
+		Title:   "Mid Task",
+		Status:  domain.TaskStatusNext,
+		DueDate: &t2,
+	})
+	writeTask(t, ws, &domain.Task{
+		ID:      idLate,
+		Title:   "Late Task",
+		Status:  domain.TaskStatusNext,
+		DueDate: &t3,
+	})
+	openRebuild(t, g, ws, indexPath)
+
+	// Case 1: now is 2026-08-22 -> only idEarly is due
+	now1 := "2026-08-22T00:00:00Z"
+	env1 := invoke(t, g, map[string]interface{}{"op": "list", "view": "agenda", "now": now1})
+	wantOK(t, env1)
+	ids1 := dataTaskIDs(t, env1)
+	if !reflect.DeepEqual(ids1, []string{idEarly}) {
+		t.Fatalf("agenda at %s: ids = %v, want [%s]", now1, ids1, idEarly)
+	}
+
+	// Case 2: now is 2026-08-26 -> idEarly and idMid are due
+	now2 := "2026-08-26T00:00:00Z"
+	env2 := invoke(t, g, map[string]interface{}{"op": "list", "view": "agenda", "now": now2})
+	wantOK(t, env2)
+	ids2 := dataTaskIDs(t, env2)
+	if !reflect.DeepEqual(ids2, []string{idEarly, idMid}) {
+		t.Fatalf("agenda at %s: ids = %v, want [%s, %s]", now2, ids2, idEarly, idMid)
+	}
+
+	// Case 3: now is invalid -> falls back to time.Now() gracefully without failing
+	env3 := invoke(t, g, map[string]interface{}{"op": "list", "view": "agenda", "now": "invalid-time"})
+	wantOK(t, env3)
+}
+
 
 func TestInvoke_ListAgenda_DueToday(t *testing.T) {
 	g := newGtd(t)

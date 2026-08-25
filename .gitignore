@@ -1,0 +1,11 @@
+# Binaries & build artifacts
+dist/
+bin/
+test-bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
