@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,12 +150,55 @@ func (c *Context) RebuildIndex(now time.Time) (*RebuildResult, error) {
 		}
 	}
 
+	_, _ = c.db.Exec(`INSERT INTO index_meta (key, value) VALUES ('last_rebuilt_at', ?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, now.UTC().Format(time.RFC3339Nano))
+
 	return &RebuildResult{
 		RebuiltAt:        now.UTC(),
 		Indexed:          indexed,
 		SkippedConflicts: skipped,
 		Errors:           errs,
 	}, nil
+}
+
+// GetLastRebuiltAt returns the timestamp of the last index rebuild, or zero time if never rebuilt.
+func (c *Context) GetLastRebuiltAt() (time.Time, error) {
+	if c == nil || c.db == nil {
+		return time.Time{}, nil
+	}
+	var val string
+	err := c.db.QueryRow(`SELECT value FROM index_meta WHERE key = 'last_rebuilt_at'`).Scan(&val)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, nil
+	}
+	t, parseErr := time.Parse(time.RFC3339Nano, val)
+	if parseErr != nil {
+		return time.Time{}, nil
+	}
+	return t, nil
+}
+
+// EnsureFresh checks if the index was rebuilt within maxAge. If not (or never rebuilt),
+// it executes RebuildIndex(now). Returns true if a rebuild was performed.
+func (c *Context) EnsureFresh(now time.Time, maxAge time.Duration) (bool, error) {
+	if c == nil || c.db == nil || maxAge <= 0 {
+		return false, nil
+	}
+	lastRebuilt, err := c.GetLastRebuiltAt()
+	if err != nil {
+		return false, err
+	}
+	if lastRebuilt.IsZero() || now.Sub(lastRebuilt) >= maxAge {
+		_, err := c.RebuildIndex(now)
+		if err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func uniqueStrings(in []string) []string {

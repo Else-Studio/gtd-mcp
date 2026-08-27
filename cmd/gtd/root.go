@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"gtd/internal/app"
 	"gtd/internal/domain"
@@ -83,7 +84,29 @@ func getAppContext() (*app.Context, error) {
 	if err != nil {
 		return nil, err
 	}
-	return app.Open(wsDir, filepath.Join(wsDir, "index.db"))
+	appCtx, err := app.Open(wsDir, filepath.Join(wsDir, "index.db"))
+	if err != nil {
+		return nil, err
+	}
+
+	ttl := getIndexTTL()
+	if ttl > 0 {
+		_, _ = appCtx.EnsureFresh(time.Now(), ttl)
+	}
+
+	return appCtx, nil
+}
+
+func getIndexTTL() time.Duration {
+	val := os.Getenv("GTD_INDEX_TTL")
+	if val == "" {
+		return 1 * time.Hour
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil || d < 0 {
+		return 1 * time.Hour
+	}
+	return d
 }
 
 func init() {

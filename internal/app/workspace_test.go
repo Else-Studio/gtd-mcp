@@ -209,3 +209,71 @@ Title`), 0644); err != nil {
 		t.Fatalf("inbox ids = %v, want [%s]", ids, id)
 	}
 }
+
+func TestEnsureFresh_RebuildsOnStaleness(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "gtd")
+	indexPath := filepath.Join(root, "index.db")
+	if err := Init(workspace, indexPath); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	c, err := Open(workspace, indexPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer c.Close()
+
+	// Initial state: never rebuilt
+	lastRebuilt, err := c.GetLastRebuiltAt()
+	if err != nil {
+		t.Fatalf("GetLastRebuiltAt: %v", err)
+	}
+	if !lastRebuilt.IsZero() {
+		t.Fatalf("expected zero time before rebuild, got %v", lastRebuilt)
+	}
+
+	// First call to EnsureFresh should rebuild because lastRebuilt is zero
+	now := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+	rebuilt, err := c.EnsureFresh(now, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("EnsureFresh: %v", err)
+	}
+	if !rebuilt {
+		t.Fatal("expected EnsureFresh to rebuild when timestamp was zero")
+	}
+
+	lastRebuilt, err = c.GetLastRebuiltAt()
+	if err != nil {
+		t.Fatalf("GetLastRebuiltAt: %v", err)
+	}
+	if !lastRebuilt.Equal(now) {
+		t.Fatalf("lastRebuilt = %v, want %v", lastRebuilt, now)
+	}
+
+	// 30 minutes later: still fresh, should NOT rebuild
+	rebuilt, err = c.EnsureFresh(now.Add(30*time.Minute), 1*time.Hour)
+	if err != nil {
+		t.Fatalf("EnsureFresh: %v", err)
+	}
+	if rebuilt {
+		t.Fatal("expected EnsureFresh to skip rebuild when within maxAge")
+	}
+
+	// 65 minutes later: stale, should rebuild
+	rebuilt, err = c.EnsureFresh(now.Add(65*time.Minute), 1*time.Hour)
+	if err != nil {
+		t.Fatalf("EnsureFresh: %v", err)
+	}
+	if !rebuilt {
+		t.Fatal("expected EnsureFresh to rebuild when past maxAge")
+	}
+
+	lastRebuilt, err = c.GetLastRebuiltAt()
+	if err != nil {
+		t.Fatalf("GetLastRebuiltAt: %v", err)
+	}
+	if !lastRebuilt.Equal(now.Add(65 * time.Minute)) {
+		t.Fatalf("lastRebuilt = %v, want %v", lastRebuilt, now.Add(65*time.Minute))
+	}
+}
