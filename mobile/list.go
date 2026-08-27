@@ -21,6 +21,8 @@ func (g *Gtd) list(r request) string {
 	switch r.View {
 	case "inbox":
 		ids, err = g.ctx.ListInboxIDs(ctx)
+	case "next":
+		ids, err = g.ctx.ListNextIDs(ctx, app.TaskListFilter{})
 	case "agenda":
 		now := time.Now()
 		if r.Now != nil {
@@ -34,6 +36,11 @@ func (g *Gtd) list(r request) string {
 			return encodeFail("validation", "context is required when view=context")
 		}
 		ids, err = g.ctx.ListTaskIDs("", app.TaskListFilter{Context: r.Context})
+	case "project":
+		if r.ProjectId == "" && r.Project == "" {
+			return encodeFail("validation", "project_id or project is required when view=project")
+		}
+		ids, err = g.ctx.ListTaskIDs("", app.TaskListFilter{ProjectID: r.ProjectId, ProjectTitle: r.Project})
 	default:
 		return encodeFail("validation", "unknown or missing view")
 	}

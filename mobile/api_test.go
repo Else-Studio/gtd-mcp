@@ -511,6 +511,26 @@ func TestGoldens_ListCatalog(t *testing.T) {
 		t.Errorf("list agenda request does not match testdata/list_agenda_request.json")
 	}
 
+	encodedNext, err := json.Marshal(map[string]string{"op": "list", "view": "next"})
+	if err != nil {
+		t.Fatalf("marshal list next: %v", err)
+	}
+	if !reflect.DeepEqual(unmarshalMap(t, encodedNext), unmarshalMap(t, readGolden(t, "list_next_request.json"))) {
+		t.Errorf("list next request does not match testdata/list_next_request.json")
+	}
+
+	encodedProject, err := json.Marshal(map[string]string{
+		"op":         "list",
+		"project_id": kitchenProjectID,
+		"view":       "project",
+	})
+	if err != nil {
+		t.Fatalf("marshal list project: %v", err)
+	}
+	if !reflect.DeepEqual(unmarshalMap(t, encodedProject), unmarshalMap(t, readGolden(t, "list_project_request.json"))) {
+		t.Errorf("list project request does not match testdata/list_project_request.json")
+	}
+
 	encodedContext, err := json.Marshal(map[string]string{"op": "list", "view": "context", "context": "@office"})
 	if err != nil {
 		t.Fatalf("marshal list context: %v", err)
@@ -536,6 +556,12 @@ func TestGoldens_ListCatalog(t *testing.T) {
 
 	inboxEnv := invoke(t, g, map[string]string{"op": "list", "view": "inbox"})
 	assertContainsKeys(t, inboxEnv, unmarshalMap(t, readGolden(t, "list_inbox_response.json")), "")
+
+	nextEnv := invoke(t, g, map[string]string{"op": "list", "view": "next"})
+	assertContainsKeys(t, nextEnv, unmarshalMap(t, readGolden(t, "list_next_response.json")), "")
+
+	projectEnv := invoke(t, g, map[string]string{"op": "list", "view": "project", "project_id": kitchenProjectID})
+	assertContainsKeys(t, projectEnv, unmarshalMap(t, readGolden(t, "list_project_response.json")), "")
 
 	contextEnv := invoke(t, g, map[string]string{"op": "list", "view": "context", "context": "@office"})
 	assertContainsKeys(t, contextEnv, unmarshalMap(t, readGolden(t, "list_context_response.json")), "")

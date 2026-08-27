@@ -19,6 +19,8 @@ type request struct {
 	IndexPath     string  `json:"indexPath"`
 	View          string  `json:"view"`
 	Context       string  `json:"context"`
+	ProjectId     string  `json:"project_id,omitempty"`
+	Project       string  `json:"project,omitempty"`
 	Text          string  `json:"text"`
 	ID            string  `json:"id"`
 	Status        string  `json:"status"`
